@@ -69,7 +69,7 @@ function Index() {
             alt="Royal lamb biryani with saffron rice and fresh coriander"
             width={800}
             height={1008}
-            className="aspect-[4/5] w-full rounded-2xl object-cover"
+            className="aspect-[4/5] w-full rounded-2xl object-cover sm:aspect-[16/9]"
           />
         </section>
 
@@ -121,7 +121,7 @@ function Index() {
         </section>
       </main>
 
-      <div className="fixed bottom-6 left-1/2 z-50 w-[calc(100%-48px)] max-w-[342px] -translate-x-1/2">
+      <div className="fixed bottom-6 left-1/2 z-50 w-[calc(100%-48px)] max-w-[342px] -translate-x-1/2 md:hidden">
         <Link
           to="/menu"
           className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gold py-4 font-bold text-gold-foreground shadow-xl"
