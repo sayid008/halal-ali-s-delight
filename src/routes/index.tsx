@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { HomeMenuBrowser } from "@/components/home-menu-browser";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
-import { MenuItemRow } from "@/components/menu-item-row";
-import { chefSpecials, restaurant } from "@/data/menu";
+import { menuSections, restaurant } from "@/data/menu";
 import heroBiryani from "@/assets/hero-biryani.jpg";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
@@ -22,15 +22,6 @@ export const Route = createFileRoute("/")({
   }),
   component: Index,
 });
-
-const categories = [
-  { id: "starters", label: "Starters" },
-  { id: "grill", label: "Main Grill" },
-  { id: "curries", label: "Curries" },
-  { id: "biryani", label: "Biryani" },
-  { id: "breads", label: "Breads" },
-  { id: "desserts", label: "Desserts" },
-];
 
 function Index() {
   return (
@@ -73,31 +64,9 @@ function Index() {
           />
         </section>
 
-        <div className="no-scrollbar mx-auto flex max-w-5xl gap-4 overflow-x-auto px-6 py-4">
-          {categories.map((cat, i) => (
-            <Link
-              key={cat.id}
-              to="/menu"
-              hash={cat.id}
-              className={
-                i === 0
-                  ? "whitespace-nowrap rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
-                  : "whitespace-nowrap rounded-full border border-input px-5 py-2 text-sm font-medium"
-              }
-            >
-              {cat.label}
-            </Link>
-          ))}
-        </div>
+        <HomeMenuBrowser sections={menuSections} />
 
-        <section className="mx-auto max-w-5xl space-y-8 px-6 py-4 pb-28">
-          <div className="space-y-6">
-            <h2 className="font-serif text-2xl">Chef's Specials</h2>
-            {chefSpecials.map((item) => (
-              <MenuItemRow key={item.name} item={item} />
-            ))}
-          </div>
-
+        <section className="mx-auto max-w-5xl px-6 py-10 pb-28">
           <div className="space-y-4 rounded-2xl bg-primary p-6 text-primary-foreground">
             <div className="flex items-center gap-3">
               <div className="grid size-8 place-items-center rounded-full bg-gold/25 text-gold">
