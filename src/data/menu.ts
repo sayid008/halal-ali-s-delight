@@ -1,3 +1,17 @@
+import chickenPakora from "@/assets/dish-chicken-pakora.jpg";
+import onionBhaji from "@/assets/dish-onion-bhaji.jpg";
+import chickenTikkaSkewers from "@/assets/dish-chicken-tikka-skewers.jpg";
+import mixedGrill from "@/assets/dish-mixed-grill.jpg";
+import lambKarahi from "@/assets/dish-lamb-karahi.jpg";
+import daalTarka from "@/assets/dish-daal-tarka.jpg";
+import chickenBiryani from "@/assets/dish-chicken-biryani.jpg";
+import pilauRice from "@/assets/dish-pilau-rice.jpg";
+import garlicNaan from "@/assets/dish-garlic-naan.jpg";
+import mintRaita from "@/assets/dish-mint-raita.jpg";
+import gulabJamun from "@/assets/dish-gulab-jamun.jpg";
+import kheer from "@/assets/dish-kheer.jpg";
+import mangoLassi from "@/assets/dish-mango-lassi.jpg";
+import masalaChai from "@/assets/dish-masala-chai.jpg";
 import seekhKebab from "@/assets/dish-seekh-kebab.jpg";
 import butterChicken from "@/assets/dish-butter-chicken.jpg";
 import naan from "@/assets/dish-naan.jpg";
@@ -54,11 +68,13 @@ export const menuSections: MenuSection[] = [
         name: "Chicken Pakora",
         description: "Gram flour batter, crisp fried, served with mint raita.",
         price: "£7.00",
+        image: chickenPakora,
       },
       {
         name: "Onion Bhaji",
         description: "Sweet onion, cumin and coriander, fried golden.",
         price: "£5.50",
+        image: onionBhaji,
       },
     ],
   },
@@ -76,11 +92,13 @@ export const menuSections: MenuSection[] = [
         name: "Chicken Tikka Skewers",
         description: "Yoghurt and paprika marinade, charred over charcoal.",
         price: "£11.50",
+        image: chickenTikkaSkewers,
       },
       {
         name: "Mixed Grill Platter",
         description: "Seekh kebab, chicken tikka, lamb chop and grilled wings for two.",
         price: "£24.00",
+        image: mixedGrill,
       },
     ],
   },
@@ -104,11 +122,13 @@ export const menuSections: MenuSection[] = [
         name: "Lamb Karahi",
         description: "Slow-cooked lamb with tomato, ginger and green chilli.",
         price: "£15.00",
+        image: lambKarahi,
       },
       {
         name: "Daal Tarka",
         description: "Yellow lentils finished with cumin-tempered ghee.",
         price: "£9.50",
+        image: daalTarka,
       },
     ],
   },
@@ -126,11 +146,13 @@ export const menuSections: MenuSection[] = [
         name: "Chicken Biryani",
         description: "Layered basmati with spiced chicken and boiled egg.",
         price: "£14.00",
+        image: chickenBiryani,
       },
       {
         name: "Pilau Rice",
         description: "Basmati steamed with whole spices.",
         price: "£3.50",
+        image: pilauRice,
       },
     ],
   },
@@ -148,11 +170,13 @@ export const menuSections: MenuSection[] = [
         name: "Garlic Naan",
         description: "Fresh from the tandoor with garlic butter and coriander.",
         price: "£3.75",
+        image: garlicNaan,
       },
       {
         name: "Mint Raita",
         description: "Cool yoghurt, cucumber and fresh mint.",
         price: "£2.50",
+        image: mintRaita,
       },
     ],
   },
@@ -164,21 +188,25 @@ export const menuSections: MenuSection[] = [
         name: "Gulab Jamun",
         description: "Warm milk dumplings soaked in cardamom syrup.",
         price: "£5.00",
+        image: gulabJamun,
       },
       {
         name: "Kheer",
         description: "Slow-cooked rice pudding with pistachio.",
         price: "£4.50",
+        image: kheer,
       },
       {
         name: "Mango Lassi",
         description: "Yoghurt blended with sweet Alphonso mango.",
         price: "£3.50",
+        image: mangoLassi,
       },
       {
         name: "Masala Chai",
         description: "Spiced black tea brewed with milk.",
         price: "£2.50",
+        image: masalaChai,
       },
     ],
   },
