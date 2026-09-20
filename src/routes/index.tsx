@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { HomeMenuBrowser } from "@/components/home-menu-browser";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
-import { menuSections, restaurant } from "@/data/menu";
+import { menuSections as staticSections, restaurant } from "@/data/menu";
+import { usePublicMenu } from "@/hooks/use-public-menu";
 import heroBiryani from "@/assets/hero-biryani.jpg";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
@@ -24,6 +25,22 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  const { sections, loading } = usePublicMenu();
+
+  const displaySections =
+    sections.length > 0
+      ? sections.map((s) => ({
+          id: s.id,
+          title: s.title,
+          items: s.items.map((item) => ({
+            name: item.name,
+            description: item.description,
+            price: item.price,
+            image: item.image_url ?? undefined,
+          })),
+        }))
+      : staticSections;
+
   return (
     <div className="min-h-screen bg-background text-primary">
       <SiteHeader />
@@ -64,7 +81,7 @@ function Index() {
           />
         </section>
 
-        <HomeMenuBrowser sections={menuSections} />
+        <HomeMenuBrowser sections={displaySections} />
 
         <section className="mx-auto max-w-5xl px-6 py-10 pb-28">
           <div className="space-y-4 rounded-2xl bg-primary p-6 text-primary-foreground">

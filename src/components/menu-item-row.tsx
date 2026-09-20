@@ -1,6 +1,15 @@
-import type { MenuItem } from "@/data/menu";
+import { formatPrice } from "@/lib/supabase";
 
-export function MenuItemRow({ item }: { item: MenuItem }) {
+type ItemProps = {
+  name: string;
+  description: string;
+  price: number | string;
+  image?: string | null;
+};
+
+export function MenuItemRow({ item }: { item: ItemProps }) {
+  const displayPrice = typeof item.price === "number" ? formatPrice(item.price) : item.price;
+
   return (
     <div className="flex gap-4">
       {item.image ? (
@@ -20,7 +29,7 @@ export function MenuItemRow({ item }: { item: MenuItem }) {
       <div className="flex-1 py-1">
         <div className="flex items-start justify-between gap-3">
           <h3 className="font-semibold">{item.name}</h3>
-          <span className="font-bold text-gold">{item.price}</span>
+          <span className="font-bold text-gold">{displayPrice}</span>
         </div>
         <p className="mt-1 text-sm text-primary/70">{item.description}</p>
       </div>

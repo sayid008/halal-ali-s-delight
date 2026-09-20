@@ -22,7 +22,7 @@ import biryani from "@/assets/hero-biryani.jpg";
 export type MenuItem = {
   name: string;
   description: string;
-  price: string;
+  price: string | number;
   image?: string;
 };
 
