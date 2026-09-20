@@ -65,7 +65,6 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-
 :root {
   --radius: 0.75rem;
   --background: oklch(0.988 0.008 85);
@@ -111,7 +110,6 @@
   }
 }
 
-
 @layer base {
   * {
     border-color: var(--color-border);
@@ -121,6 +119,5 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
-
   }
 }

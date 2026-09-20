@@ -1,12 +1,23 @@
 import { useEffect, useState } from "react";
-import { supabase, type DatabaseMenuItem, type DatabaseCategory, type MenuSectionWithItems } from "@/lib/supabase";
+import {
+  supabase,
+  isSupabaseConfigured,
+  type DatabaseMenuItem,
+  type DatabaseCategory,
+  type MenuSectionWithItems,
+} from "@/lib/supabase";
 
 export function usePublicMenu() {
   const [sections, setSections] = useState<MenuSectionWithItems[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(isSupabaseConfigured);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setLoading(false);
+      return;
+    }
+
     let mounted = true;
 
     async function fetchMenu() {
@@ -47,6 +58,10 @@ export function usePublicMenu() {
     }
 
     fetchMenu();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return { sections, loading, error };

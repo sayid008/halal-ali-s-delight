@@ -1,9 +1,23 @@
+import { useLocation } from "@tanstack/react-router";
 import { restaurant } from "@/data/menu";
 
 const WHATSAPP_NUMBER = "918431903828";
 const ORDER_MESSAGE = `Hello ${restaurant.name}, I would like to place an order:`;
 
 export function WhatsAppButton() {
+  const location = useLocation();
+  const pathname = location.pathname;
+
+  // Do not show on admin panel or menu page
+  if (
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname === "/menu" ||
+    pathname.startsWith("/menu/")
+  ) {
+    return null;
+  }
+
   const href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(ORDER_MESSAGE)}`;
 
   return (

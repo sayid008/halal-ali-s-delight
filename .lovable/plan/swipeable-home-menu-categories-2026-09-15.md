@@ -1,6 +1,7 @@
 # Swipeable home menu categories
 
 ## What will change
+
 - Add a horizontal, touch-friendly category row on the home page inspired by the reference image.
 - Use circular food photos with category names beneath them and a clear selected state.
 - Include **All Items** first and select it by default.
@@ -9,6 +10,7 @@
 - Allow the category row to scroll smoothly in either direction by swipe, trackpad, or mouse wheel.
 
 ## Technical details
+
 - Reuse the existing menu sections and food images rather than embedding the uploaded screenshot.
 - Keep filtering as home-page interface state, so no page navigation or reload occurs.
 - Preserve accessible controls, responsive sizing, and the existing restaurant styling.

@@ -23,7 +23,8 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
       image: section.items.find((item) => item.image)?.image ?? heroBiryani,
     })),
   ];
-  const visibleSections = selected === "all" ? sections : sections.filter(({ id }) => id === selected);
+  const visibleSections =
+    selected === "all" ? sections : sections.filter(({ id }) => id === selected);
 
   function scrollCategories(direction: -1 | 1) {
     scrollerRef.current?.scrollBy({ left: direction * 280, behavior: "smooth" });
@@ -74,7 +75,11 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
                     aria-pressed={isSelected}
                     onClick={(event) => {
                       setSelected(category.id);
-                      event.currentTarget.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+                      event.currentTarget.scrollIntoView({
+                        behavior: "smooth",
+                        block: "nearest",
+                        inline: "center",
+                      });
                     }}
                     className="h-auto w-24 shrink-0 snap-start flex-col gap-3 rounded-none bg-transparent p-0 shadow-none hover:bg-transparent sm:w-28"
                   >
@@ -92,7 +97,9 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
                         className="size-full rounded-full object-cover"
                       />
                     </span>
-                    <span className={`w-full whitespace-normal text-center text-sm ${isSelected ? "font-bold text-gold" : "text-primary"}`}>
+                    <span
+                      className={`w-full whitespace-normal text-center text-sm ${isSelected ? "font-bold text-gold" : "text-primary"}`}
+                    >
                       {category.label}
                     </span>
                   </Button>

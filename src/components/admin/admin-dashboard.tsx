@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
-import { supabase, formatPrice, type DatabaseMenuItem, type DatabaseCategory } from "@/lib/supabase";
+import {
+  supabase,
+  formatPrice,
+  type DatabaseMenuItem,
+  type DatabaseCategory,
+} from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -165,7 +176,9 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     setUploading(true);
     const ext = file.name.split(".").pop();
     const path = `${Date.now()}.${ext}`;
-    const { error: upErr } = await supabase.storage.from("menu-images").upload(path, file, { cacheControl: "3600", upsert: false });
+    const { error: upErr } = await supabase.storage
+      .from("menu-images")
+      .upload(path, file, { cacheControl: "3600", upsert: false });
     if (upErr) {
       toast.error("Upload failed");
       setUploading(false);
@@ -208,7 +221,9 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="font-serif text-2xl">Menu Items</h2>
-            <p className="text-sm text-muted-foreground">{items.length} items across {categories.length} categories</p>
+            <p className="text-sm text-muted-foreground">
+              {items.length} items across {categories.length} categories
+            </p>
           </div>
           <Button onClick={openAdd}>
             <Plus className="mr-2 size-4" />
@@ -219,12 +234,13 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         {/* Items list */}
         <div className="space-y-3">
           {items.map((item, idx) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-4 rounded-xl border bg-card p-4"
-            >
+            <div key={item.id} className="flex items-center gap-4 rounded-xl border bg-card p-4">
               {item.image_url ? (
-                <img src={item.image_url} alt={item.name} className="size-16 shrink-0 rounded-lg object-cover" />
+                <img
+                  src={item.image_url}
+                  alt={item.name}
+                  className="size-16 shrink-0 rounded-lg object-cover"
+                />
               ) : (
                 <div className="grid size-16 shrink-0 place-items-center rounded-lg bg-muted">
                   <span className="font-serif text-lg text-gold">{item.name.charAt(0)}</span>
@@ -240,7 +256,6 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                     </span>
                   )}
                 </div>
-                <p className="truncate text-sm text-muted-foreground">{item.description}</p>
                 <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
                   <span className="font-bold text-gold">{formatPrice(Number(item.price))}</span>
                   <span>{categoryName(item.category_id)}</span>
@@ -248,17 +263,39 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               </div>
 
               <div className="flex shrink-0 items-center gap-1">
-                <Button variant="ghost" size="icon" onClick={() => moveItem(item.id, -1)} disabled={idx === 0} title="Move up">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => moveItem(item.id, -1)}
+                  disabled={idx === 0}
+                  title="Move up"
+                >
                   <ArrowUp className="size-4" />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => moveItem(item.id, 1)} disabled={idx === items.length - 1} title="Move down">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => moveItem(item.id, 1)}
+                  disabled={idx === items.length - 1}
+                  title="Move down"
+                >
                   <ArrowDown className="size-4" />
                 </Button>
-                <Switch checked={item.available} onCheckedChange={() => toggleAvailable(item)} title="Toggle availability" />
+                <Switch
+                  checked={item.available}
+                  onCheckedChange={() => toggleAvailable(item)}
+                  title="Toggle availability"
+                />
                 <Button variant="ghost" size="icon" onClick={() => openEdit(item)} title="Edit">
                   <Pencil className="size-4" />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => setDeleteId(item.id)} title="Delete" className="text-destructive">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setDeleteId(item.id)}
+                  title="Delete"
+                  className="text-destructive"
+                >
                   <Trash2 className="size-4" />
                 </Button>
               </div>
@@ -286,7 +323,11 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
               <Label>Image</Label>
               <div className="flex items-center gap-4">
                 {editForm.image_url ? (
-                  <img src={editForm.image_url} alt="Preview" className="size-20 rounded-lg object-cover" />
+                  <img
+                    src={editForm.image_url}
+                    alt="Preview"
+                    className="size-20 rounded-lg object-cover"
+                  />
                 ) : (
                   <div className="grid size-20 place-items-center rounded-lg bg-muted">
                     <Upload className="size-5 text-muted-foreground" />
@@ -324,28 +365,50 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
-              <Input id="name" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} placeholder="Dish name" />
+              <Input
+                id="name"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Dish name"
+              />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea id="description" value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} placeholder="Short description" rows={2} />
+              <Label htmlFor="description">Description (optional)</Label>
+              <Textarea
+                id="description"
+                value={editForm.description}
+                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="Optional description"
+                rows={2}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="price">Price (₹)</Label>
-                <Input id="price" type="number" value={editForm.price} onChange={(e) => setEditForm((f) => ({ ...f, price: e.target.value }))} placeholder="0" />
+                <Input
+                  id="price"
+                  type="number"
+                  value={editForm.price}
+                  onChange={(e) => setEditForm((f) => ({ ...f, price: e.target.value }))}
+                  placeholder="0"
+                />
               </div>
               <div className="space-y-2">
                 <Label>Category</Label>
-                <Select value={editForm.category_id} onValueChange={(v) => setEditForm((f) => ({ ...f, category_id: v }))}>
+                <Select
+                  value={editForm.category_id}
+                  onValueChange={(v) => setEditForm((f) => ({ ...f, category_id: v }))}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
                     {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                      <SelectItem key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -353,7 +416,10 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             </div>
 
             <div className="flex items-center gap-3">
-              <Switch checked={editForm.available} onCheckedChange={(v) => setEditForm((f) => ({ ...f, available: v }))} />
+              <Switch
+                checked={editForm.available}
+                onCheckedChange={(v) => setEditForm((f) => ({ ...f, available: v }))}
+              />
               <Label>Available to customers</Label>
             </div>
           </div>
@@ -377,7 +443,12 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       </Dialog>
 
       {/* Delete confirmation */}
-      <AlertDialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null); }}>
+      <AlertDialog
+        open={!!deleteId}
+        onOpenChange={(open) => {
+          if (!open) setDeleteId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this menu item?</AlertDialogTitle>

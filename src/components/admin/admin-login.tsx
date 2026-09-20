@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +41,17 @@ export function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!isSupabaseConfigured && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200">
+              <p className="font-semibold">Database not connected</p>
+              <p className="mt-1">
+                Provide <code className="font-mono text-xs">VITE_SUPABASE_URL</code> and{" "}
+                <code className="font-mono text-xs">VITE_SUPABASE_ANON_KEY</code> in project
+                settings to enable the live database and admin authentication.
+              </p>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <div className="relative">

@@ -78,15 +78,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Halal Ali Dine Inn & Take Away" },
+      { title: "Halal Ali's Delight" },
       {
         name: "description",
-        content: "Family-run halal restaurant serving grills, curries and biryani in London.",
+        content:
+          "Authentic Halal Dine-in & Takeaway restaurant featuring charcoal grills, curries, and biryani in London.",
       },
-      { property: "og:title", content: "Halal Ali Dine Inn & Take Away" },
+      { property: "og:title", content: "Halal Ali's Delight" },
       {
         property: "og:description",
-        content: "Family-run halal restaurant serving grills, curries and biryani in London.",
+        content:
+          "Authentic Halal Dine-in & Takeaway restaurant featuring charcoal grills, curries, and biryani in London.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
