@@ -29,9 +29,16 @@ export const DEFAULT_SPECIAL_OFFER: SpecialOffer = {
 
 const STORAGE_KEY = "halal_ali_special_offer";
 
+function isStorageAvailable(): boolean {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
 export function getLocalSpecialOffer(): SpecialOffer {
+  if (!isStorageAvailable()) {
+    return DEFAULT_SPECIAL_OFFER;
+  }
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       return {
@@ -76,7 +83,13 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
         updated_at: data.updated_at,
       };
       // Cache locally
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteOffer));
+      if (isStorageAvailable()) {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteOffer));
+        } catch (e) {
+          console.warn("Failed to cache remote offer in localStorage:", e);
+        }
+      }
       return remoteOffer;
     }
   } catch (err) {
@@ -92,11 +105,13 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
     updated_at: new Date().toISOString(),
   };
 
-  // Always persist locally
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-  } catch (err) {
-    console.warn("Failed to write to localStorage:", err);
+  // Always persist locally if storage is available
+  if (isStorageAvailable()) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    } catch (err) {
+      console.warn("Failed to write to localStorage:", err);
+    }
   }
 
   // Notify listeners on current window
@@ -139,7 +154,9 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
 
         if (data?.id) {
           toSave.id = data.id;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+          if (isStorageAvailable()) {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+          }
         }
       }
     } catch (err) {
