@@ -4,7 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { menuSections as staticSections, restaurant } from "@/data/menu";
 import { usePublicMenu } from "@/hooks/use-public-menu";
-import heroBiryani from "@/assets/hero-biryani.jpg";
+import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
 const description =
@@ -72,13 +72,7 @@ function Index() {
             </div>
           </div>
 
-          <img
-            src={heroBiryani}
-            alt="Royal lamb biryani with saffron rice and fresh coriander"
-            width={800}
-            height={1008}
-            className="aspect-[4/5] w-full rounded-2xl object-cover sm:aspect-[16/9]"
-          />
+          <SpecialOfferHeroBanner />
         </section>
 
         <HomeMenuBrowser sections={displaySections} />

@@ -8,7 +8,7 @@ type ItemProps = {
 };
 
 export function MenuItemRow({ item }: { item: ItemProps }) {
-  const displayPrice = typeof item.price === "number" ? formatPrice(item.price) : item.price;
+  const displayPrice = formatPrice(item.price);
 
   return (
     <div className="flex items-center gap-4">

@@ -52,6 +52,19 @@ export type MenuSectionWithItems = {
   }[];
 };
 
-export function formatPrice(rupees: number): string {
-  return `₹${rupees.toLocaleString("en-IN")}`;
+export function formatPrice(price: number | string): string {
+  if (typeof price === "string") {
+    if (price.startsWith("₹")) {
+      return price;
+    }
+    const cleanStr = price.replace(/[^\d.]/g, "");
+    const parsed = parseFloat(cleanStr);
+    if (!isNaN(parsed)) {
+      return `₹${parsed % 1 === 0 ? parsed.toLocaleString("en-IN") : parsed.toFixed(2)}`;
+    }
+    return `₹${price}`;
+  }
+  const num = Number(price);
+  if (isNaN(num)) return "₹0";
+  return `₹${num % 1 === 0 ? num.toLocaleString("en-IN") : num.toFixed(2)}`;
 }
