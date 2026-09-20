@@ -12,7 +12,6 @@ interface AdminAuthProps {
 }
 
 export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
-  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -25,30 +24,14 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
     setLoading(true);
 
     try {
-      if (isSignUp) {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (signUpError) throw signUpError;
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) throw signInError;
 
-        if (data.session) {
-          toast.success("Account created and signed in!");
-          onAuthSuccess();
-        } else {
-          toast.success("Signup successful! Please check your email to confirm your account.");
-          setIsSignUp(false);
-        }
-      } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (signInError) throw signInError;
-
-        toast.success("Welcome back!");
-        onAuthSuccess();
-      }
+      toast.success("Welcome back!");
+      onAuthSuccess();
     } catch (err: unknown) {
       console.error("Auth error:", err);
       const message =
@@ -82,9 +65,7 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
             Admin Portal
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            {isSignUp
-              ? "Create an administrator account for Halal Ali's Delight"
-              : "Sign in with your Supabase credentials to manage the restaurant menu"}
+            Sign in with your administrator credentials to access the dashboard
           </p>
         </div>
       </div>
@@ -126,21 +107,17 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
-                {isSignUp && (
-                  <span className="text-[11px] text-muted-foreground">Minimum 6 characters</span>
-                )}
               </div>
               <div className="relative">
                 <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
-                  autoComplete={isSignUp ? "new-password" : "current-password"}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  minLength={6}
                   className="pl-9 pr-9"
                 />
                 <button
@@ -168,30 +145,13 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" />
-                  {isSignUp ? "Creating Account..." : "Signing In..."}
+                  Signing In...
                 </>
-              ) : isSignUp ? (
-                "Create Admin Account"
               ) : (
                 "Sign In to Dashboard"
               )}
             </Button>
           </form>
-
-          <div className="mt-6 border-t border-border pt-4 text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setError(null);
-              }}
-              className="text-xs font-medium text-gold hover:underline"
-            >
-              {isSignUp
-                ? "Already have an account? Sign in here"
-                : "Need to create a new admin user? Sign up"}
-            </button>
-          </div>
         </div>
       </div>
     </div>
