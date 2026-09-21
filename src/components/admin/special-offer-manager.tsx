@@ -8,11 +8,10 @@ import {
   saveSpecialOffer,
   getOfferSlides,
 } from "@/lib/special-offer";
-import { supabase } from "@/lib/supabase";
+import { supabase, formatPrice } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 import {
   Tag,
   Upload,
@@ -27,6 +26,8 @@ import {
   Plus,
   Trash2,
   Layers,
+  Phone,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import heroBiryani from "@/assets/hero-biryani.jpg";
@@ -699,27 +700,101 @@ export function SpecialOfferManager() {
           </div>
         </div>
 
-        {/* Right Column: Live Interactive Preview */}
+        {/* Right Column: Active Slide Static Preview */}
         <div className="space-y-4 lg:col-span-6">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold flex items-center gap-2">
               <Eye className="size-4 text-gold" />
-              Live Interactive Slider Preview
+              Active Slide Preview
             </h3>
-            <span className="text-[11px] text-muted-foreground">
-              {offer.available ? "Slide left/right to test gestures" : "Currently hidden"}
+            <span className="text-[11px] font-medium text-muted-foreground">
+              Editing Slide #{activeSlideIdx + 1} of {slides.length}
             </span>
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
             {offer.available ? (
               <div>
-                {/* Embedded Real Slider with swipe, dots, and arrows */}
-                <SpecialOfferHeroBanner customSlides={slides} customOverlay={offer.show_overlay} />
+                {/* Static Single Panel Preview (No animation, no auto-sliding, no dots, no <> buttons) */}
+                <div className="relative aspect-[4/4.5] sm:aspect-[16/9] w-full overflow-hidden rounded-2xl shadow-lg select-none">
+                  <img
+                    src={activeSlide.image_url || heroBiryani}
+                    alt={activeSlide.title || "Special Offer"}
+                    className="size-full rounded-2xl object-cover"
+                  />
+
+                  {/* Gradient and Offer Content Overlay */}
+                  <div className="absolute inset-0 flex flex-col justify-between rounded-2xl bg-gradient-to-t from-black/95 via-black/45 to-black/30 p-4 sm:p-7">
+                    {/* Top Row: Tag Badge & Price Callout */}
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-gold px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-gold-foreground shadow-sm sm:px-3.5 sm:py-1.5 sm:text-xs">
+                          <Tag className="size-3 sm:size-3.5" />
+                          {activeSlide.badge || "Special Offer"}
+                        </span>
+
+                        {activeSlide.original_price &&
+                          activeSlide.price &&
+                          activeSlide.original_price > activeSlide.price && (
+                            <span className="rounded-full border border-emerald-400/40 bg-emerald-950/80 px-2.5 py-1 text-[10px] font-bold text-emerald-300 backdrop-blur-sm sm:text-[11px]">
+                              Save {formatPrice(activeSlide.original_price - activeSlide.price)}
+                            </span>
+                          )}
+                      </div>
+
+                      {activeSlide.price ? (
+                        <div className="rounded-xl border border-white/20 bg-black/75 px-2.5 py-1 text-right backdrop-blur-md shadow-sm sm:px-3.5 sm:py-1.5 shrink-0">
+                          <span className="block text-[9px] font-semibold uppercase tracking-wider text-white/70 sm:text-[10px]">
+                            Special Price
+                          </span>
+                          <div className="flex items-baseline justify-end gap-1 sm:gap-1.5">
+                            <span className="font-serif text-base font-bold text-gold sm:text-2xl">
+                              {formatPrice(activeSlide.price)}
+                            </span>
+                            {activeSlide.original_price ? (
+                              <span className="text-[11px] text-white/50 line-through sm:text-xs">
+                                {formatPrice(activeSlide.original_price)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Bottom Area: Title, Description & Action Buttons */}
+                    <div className="max-w-2xl space-y-2 pb-2 sm:space-y-2.5">
+                      {offer.show_overlay && (
+                        <>
+                          <h2 className="font-serif text-xl font-bold leading-tight text-white drop-shadow-md sm:text-3xl">
+                            {activeSlide.title || "Special Offer Title"}
+                          </h2>
+
+                          {activeSlide.description && (
+                            <p className="line-clamp-2 text-xs leading-relaxed text-white/90 drop-shadow-sm sm:line-clamp-3 sm:text-sm">
+                              {activeSlide.description}
+                            </p>
+                          )}
+                        </>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1 sm:gap-3">
+                        <div className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-full bg-gold px-4 py-2 text-xs font-bold text-gold-foreground shadow-md sm:px-5 sm:text-sm">
+                          <Phone className="size-3.5" />
+                          <span>Call to Order</span>
+                        </div>
+
+                        <div className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-full border border-white/35 bg-black/40 px-3.5 py-2 text-xs font-semibold text-white backdrop-blur-sm sm:px-4 sm:text-sm">
+                          <span>View Menu</span>
+                          <ArrowRight className="size-3.5" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 <p className="mt-3 text-center text-xs text-muted-foreground">
-                  👆 <strong>Interactive:</strong> Swipe or drag left/right (or tap the dots below)
-                  to test sliding between offers.
+                  Showing static preview for <strong>Slide #{activeSlideIdx + 1}</strong>. Switch
+                  tabs above to edit and preview other slides.
                 </p>
               </div>
             ) : (

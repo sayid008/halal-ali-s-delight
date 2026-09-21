@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { WEEKLY_SCHEDULE, getRestaurantStatus, type RestaurantStatus } from "@/lib/opening-hours";
-import { Clock, ChevronDown, ChevronUp, Sparkles, CheckCircle2 } from "lucide-react";
+import { Clock, ChevronDown, ChevronUp, CalendarDays, CheckCircle2 } from "lucide-react";
 
 interface OpeningHoursCardProps {
   variant?: "compact" | "full" | "inline";
@@ -122,7 +122,7 @@ export function OpeningHoursCard({
       <div className="mt-4 rounded-xl border border-gold/30 bg-gold/5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Sparkles className="size-4 text-gold" />
+            <CalendarDays className="size-4 text-gold" />
             <span className="text-xs font-bold uppercase tracking-wider text-gold">
               Today's Schedule ({status.todaySchedule.day})
             </span>

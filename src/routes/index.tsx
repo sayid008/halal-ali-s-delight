@@ -185,15 +185,6 @@ function Index() {
         </section>
       </main>
 
-      <div className="fixed bottom-6 left-1/2 z-50 w-[calc(100%-80px)] max-w-[342px] -translate-x-1/2 md:hidden">
-        <Link
-          to="/menu"
-          className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gold py-4 font-bold text-gold-foreground shadow-xl"
-        >
-          <span>View Full Menu</span>
-        </Link>
-      </div>
-
       <SiteFooter />
     </div>
   );

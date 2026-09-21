@@ -26,6 +26,8 @@ import {
   RefreshCw,
   ImageIcon,
   Tag,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { menuSections as homeSections } from "@/data/menu";
@@ -337,12 +339,27 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
   }
 
-  // Touch reordering handlers for mobile / touch devices
-  function handleTouchStart(type: "item" | "category", index: number) {
+  // Quick step helpers to move items/categories directly up or down by 1 position
+  function moveItemStep(idx: number, direction: -1 | 1) {
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= filteredItems.length) return;
+    handleReorderItems(idx, targetIdx);
+  }
+
+  function moveCategoryStep(idx: number, direction: -1 | 1) {
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= categories.length) return;
+    handleReorderCategories(idx, targetIdx);
+  }
+
+  // Touch and swipe reordering handlers for mobile / touch devices
+  function handleTouchStart(e: React.TouchEvent, type: "item" | "category", index: number) {
+    const touch = e.touches[0];
     touchDragRef.current = {
       type,
       fromIndex: index,
       lastOverIndex: index,
+      startY: touch ? touch.clientY : 0,
     };
     if (type === "category") {
       setDraggingCatIdx(index);
@@ -357,6 +374,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (!touchDragRef.current) return;
     const touch = e.touches[0];
     if (!touch) return;
+
+    // 1. Try DOM element under touch point
     const targetElem = document.elementFromPoint(touch.clientX, touch.clientY);
     const row = targetElem?.closest(`[data-drag-type="${type}"]`);
     if (row) {
@@ -370,7 +389,24 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           } else {
             setDragOverItemIdx(idx);
           }
+          return;
         }
+      }
+    }
+
+    // 2. Direct swipe displacement calculation
+    const deltaY = touch.clientY - touchDragRef.current.startY;
+    const approxRowHeight = 55;
+    const steps = Math.trunc(deltaY / approxRowHeight);
+    const maxIdx = type === "category" ? categories.length - 1 : filteredItems.length - 1;
+    const targetIdx = Math.max(0, Math.min(maxIdx, touchDragRef.current.fromIndex + steps));
+
+    if (targetIdx !== touchDragRef.current.lastOverIndex) {
+      touchDragRef.current.lastOverIndex = targetIdx;
+      if (type === "category") {
+        setDragOverCatIdx(targetIdx);
+      } else {
+        setDragOverItemIdx(targetIdx);
       }
     }
   }
@@ -669,8 +705,22 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                       >
                         {/* Single Row: Reorder Handle + Image + Details + Edit/Delete Actions */}
                         <div className="flex items-center gap-2.5 sm:gap-3">
-                          {/* Reorder Handle */}
-                          <div className="flex flex-col items-center gap-1 shrink-0">
+                          {/* Reorder Handle: Swipe '=' or tap arrows */}
+                          <div className="flex flex-col items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveItemStep(idx, -1);
+                              }}
+                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
+                              title="Move up"
+                              aria-label={`Move ${item.name} up`}
+                            >
+                              <ChevronUp className="size-3.5" />
+                            </button>
+
                             <div
                               draggable
                               onDragStart={(e) => {
@@ -682,15 +732,30 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 setDraggingItemIdx(null);
                                 setDragOverItemIdx(null);
                               }}
-                              onTouchStart={() => handleTouchStart("item", idx)}
+                              onTouchStart={(e) => handleTouchStart(e, "item", idx)}
                               onTouchMove={(e) => handleTouchMove(e, "item")}
                               onTouchEnd={() => handleTouchEnd("item")}
-                              className="flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-sm font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:bg-gold/10 cursor-grab active:cursor-grabbing select-none"
-                              title="Hold '=' and drag to reorder"
+                              className="flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:border-gold active:bg-gold/20 cursor-grab active:cursor-grabbing select-none"
+                              title="Swipe '=' up or down, or tap arrows above/below to reorder"
                               aria-label={`Reorder ${item.name}`}
                             >
                               =
                             </div>
+
+                            <button
+                              type="button"
+                              disabled={idx === filteredItems.length - 1}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveItemStep(idx, 1);
+                              }}
+                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
+                              title="Move down"
+                              aria-label={`Move ${item.name} down`}
+                            >
+                              <ChevronDown className="size-3.5" />
+                            </button>
+
                             <span className="text-[10px] font-mono font-medium text-muted-foreground">
                               #{idx + 1}
                             </span>
@@ -815,27 +880,52 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 isDropTargetBottom ? "border-b-2 border-gold bg-gold/5" : ""
                               }`}
                             >
-                              {/* Reorder Handle: '=' symbol */}
-                              <td className="w-12 px-3 py-3 text-center align-middle">
-                                <div
-                                  draggable
-                                  onDragStart={(e) => {
-                                    e.dataTransfer.effectAllowed = "move";
-                                    e.dataTransfer.setData("text/plain", String(idx));
-                                    setDraggingItemIdx(idx);
-                                  }}
-                                  onDragEnd={() => {
-                                    setDraggingItemIdx(null);
-                                    setDragOverItemIdx(null);
-                                  }}
-                                  onTouchStart={() => handleTouchStart("item", idx)}
-                                  onTouchMove={(e) => handleTouchMove(e, "item")}
-                                  onTouchEnd={() => handleTouchEnd("item")}
-                                  className="group/grab inline-flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
-                                  title="Hold '=' and drag up or down to reorder"
-                                  aria-label={`Hold and drag to reorder ${item.name}`}
-                                >
-                                  =
+                              {/* Reorder Handle: '=' symbol & quick step buttons */}
+                              <td className="w-16 px-2 py-3 text-center align-middle">
+                                <div className="inline-flex items-center gap-1">
+                                  <div className="flex flex-col gap-0.5">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => moveItemStep(idx, -1)}
+                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
+                                      title="Move up"
+                                      aria-label={`Move ${item.name} up`}
+                                    >
+                                      <ChevronUp className="size-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === filteredItems.length - 1}
+                                      onClick={() => moveItemStep(idx, 1)}
+                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
+                                      title="Move down"
+                                      aria-label={`Move ${item.name} down`}
+                                    >
+                                      <ChevronDown className="size-3" />
+                                    </button>
+                                  </div>
+
+                                  <div
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.effectAllowed = "move";
+                                      e.dataTransfer.setData("text/plain", String(idx));
+                                      setDraggingItemIdx(idx);
+                                    }}
+                                    onDragEnd={() => {
+                                      setDraggingItemIdx(null);
+                                      setDragOverItemIdx(null);
+                                    }}
+                                    onTouchStart={(e) => handleTouchStart(e, "item", idx)}
+                                    onTouchMove={(e) => handleTouchMove(e, "item")}
+                                    onTouchEnd={() => handleTouchEnd("item")}
+                                    className="group/grab inline-flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
+                                    title="Hold '=' and drag or swipe up or down to reorder"
+                                    aria-label={`Hold or swipe to reorder ${item.name}`}
+                                  >
+                                    =
+                                  </div>
                                 </div>
                               </td>
 
@@ -966,8 +1056,22 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                       >
                         {/* Single Row: Reorder Handle + Category Details + Edit/Delete Actions */}
                         <div className="flex items-center gap-2.5 sm:gap-3">
-                          {/* Reorder Handle */}
-                          <div className="flex flex-col items-center gap-1 shrink-0">
+                          {/* Reorder Handle: Swipe '=' or tap arrows */}
+                          <div className="flex flex-col items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveCategoryStep(idx, -1);
+                              }}
+                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
+                              title="Move up"
+                              aria-label={`Move category ${cat.name} up`}
+                            >
+                              <ChevronUp className="size-3.5" />
+                            </button>
+
                             <div
                               draggable
                               onDragStart={(e) => {
@@ -979,15 +1083,30 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 setDraggingCatIdx(null);
                                 setDragOverCatIdx(null);
                               }}
-                              onTouchStart={() => handleTouchStart("category", idx)}
+                              onTouchStart={(e) => handleTouchStart(e, "category", idx)}
                               onTouchMove={(e) => handleTouchMove(e, "category")}
                               onTouchEnd={() => handleTouchEnd("category")}
-                              className="flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-sm font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:bg-gold/10 cursor-grab active:cursor-grabbing select-none"
-                              title="Hold '=' and drag to reorder"
+                              className="flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:border-gold active:bg-gold/20 cursor-grab active:cursor-grabbing select-none"
+                              title="Swipe '=' up or down, or tap arrows above/below to reorder"
                               aria-label={`Reorder category ${cat.name}`}
                             >
                               =
                             </div>
+
+                            <button
+                              type="button"
+                              disabled={idx === sortedCategories.length - 1}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moveCategoryStep(idx, 1);
+                              }}
+                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
+                              title="Move down"
+                              aria-label={`Move category ${cat.name} down`}
+                            >
+                              <ChevronDown className="size-3.5" />
+                            </button>
+
                             <span className="text-[10px] font-mono font-medium text-muted-foreground">
                               #{cat.sort_order}
                             </span>
@@ -1097,27 +1216,52 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 isDropTargetBottom ? "border-b-2 border-gold bg-gold/5" : ""
                               }`}
                             >
-                              {/* Reorder Handle: '=' symbol */}
-                              <td className="w-12 px-3 py-3 text-center align-middle">
-                                <div
-                                  draggable
-                                  onDragStart={(e) => {
-                                    e.dataTransfer.effectAllowed = "move";
-                                    e.dataTransfer.setData("text/plain", String(idx));
-                                    setDraggingCatIdx(idx);
-                                  }}
-                                  onDragEnd={() => {
-                                    setDraggingCatIdx(null);
-                                    setDragOverCatIdx(null);
-                                  }}
-                                  onTouchStart={() => handleTouchStart("category", idx)}
-                                  onTouchMove={(e) => handleTouchMove(e, "category")}
-                                  onTouchEnd={() => handleTouchEnd("category")}
-                                  className="group/grab inline-flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
-                                  title="Hold '=' and drag up or down to reorder"
-                                  aria-label={`Hold and drag to reorder category ${cat.name}`}
-                                >
-                                  =
+                              {/* Reorder Handle: '=' symbol & quick step buttons */}
+                              <td className="w-16 px-2 py-3 text-center align-middle">
+                                <div className="inline-flex items-center gap-1">
+                                  <div className="flex flex-col gap-0.5">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => moveCategoryStep(idx, -1)}
+                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
+                                      title="Move up"
+                                      aria-label={`Move category ${cat.name} up`}
+                                    >
+                                      <ChevronUp className="size-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === sortedCategories.length - 1}
+                                      onClick={() => moveCategoryStep(idx, 1)}
+                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
+                                      title="Move down"
+                                      aria-label={`Move category ${cat.name} down`}
+                                    >
+                                      <ChevronDown className="size-3" />
+                                    </button>
+                                  </div>
+
+                                  <div
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.effectAllowed = "move";
+                                      e.dataTransfer.setData("text/plain", String(idx));
+                                      setDraggingCatIdx(idx);
+                                    }}
+                                    onDragEnd={() => {
+                                      setDraggingCatIdx(null);
+                                      setDragOverCatIdx(null);
+                                    }}
+                                    onTouchStart={(e) => handleTouchStart(e, "category", idx)}
+                                    onTouchMove={(e) => handleTouchMove(e, "category")}
+                                    onTouchEnd={() => handleTouchEnd("category")}
+                                    className="group/grab inline-flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
+                                    title="Hold '=' and drag or swipe up or down to reorder"
+                                    aria-label={`Hold or swipe to reorder category ${cat.name}`}
+                                  >
+                                    =
+                                  </div>
                                 </div>
                               </td>
                               <td className="px-4 py-3 font-semibold text-foreground text-sm">
