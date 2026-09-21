@@ -307,12 +307,31 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const [draggingItemIdx, setDraggingItemIdx] = useState<number | null>(null);
   const [dragOverItemIdx, setDragOverItemIdx] = useState<number | null>(null);
 
+  // Direct state for active drag tooltip / visual feedback
+  const [activeDragFeedback, setActiveDragFeedback] = useState<{
+    name: string;
+    targetPos: number;
+  } | null>(null);
+
   const touchDragRef = useRef<{
     type: "item" | "category";
     fromIndex: number;
     lastOverIndex: number | null;
+    pointerId?: number;
+    touchId?: number;
     startY: number;
   } | null>(null);
+
+  // Helper to scroll page smoothly during drag near edges
+  function handleAutoScroll(clientY: number) {
+    const edgeThreshold = 80;
+    const windowHeight = window.innerHeight;
+    if (clientY < edgeThreshold) {
+      window.scrollBy({ top: -12, behavior: "instant" as ScrollBehavior });
+    } else if (clientY > windowHeight - edgeThreshold) {
+      window.scrollBy({ top: 12, behavior: "instant" as ScrollBehavior });
+    }
+  }
 
   // Handle reordering categories
   async function handleReorderCategories(fromIdx: number, toIdx: number) {
@@ -381,15 +400,80 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     handleReorderCategories(idx, targetIdx);
   }
 
-  // Touch and swipe reordering handlers for mobile / touch devices
-  function handleTouchStart(e: React.TouchEvent, type: "item" | "category", index: number) {
-    const touch = e.touches[0];
+  // Determine target index from cursor/touch Y position across existing rendered rows
+  function findTargetIndexByPosition(type: "item" | "category", clientY: number): number | null {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(`[data-drag-type="${type}"]`));
+    if (rows.length === 0) return null;
+
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        const rawIdx = row.getAttribute("data-index");
+        if (rawIdx !== null) {
+          const idx = parseInt(rawIdx, 10);
+          if (!isNaN(idx)) return idx;
+        }
+      }
+    }
+
+    // If clientY is above the first element
+    const firstRect = rows[0].getBoundingClientRect();
+    if (clientY < firstRect.top) {
+      const rawIdx = rows[0].getAttribute("data-index");
+      return rawIdx !== null ? parseInt(rawIdx, 10) : 0;
+    }
+
+    // If clientY is below the last element
+    const lastRow = rows[rows.length - 1];
+    const lastRect = lastRow.getBoundingClientRect();
+    if (clientY > lastRect.bottom) {
+      const rawIdx = lastRow.getAttribute("data-index");
+      return rawIdx !== null ? parseInt(rawIdx, 10) : rows.length - 1;
+    }
+
+    return null;
+  }
+
+  // Unified Drag Handlers supporting Touch & Pointer events
+  function handleReorderStart(
+    e: React.PointerEvent<HTMLElement> | React.TouchEvent<HTMLElement>,
+    type: "item" | "category",
+    index: number,
+  ) {
+    const clientY = "touches" in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
+    const clientX = "touches" in e ? (e.touches[0]?.clientX ?? 0) : e.clientX;
+
+    // Capture pointer if available for uninterrupted tracking even if finger leaves button
+    if ("setPointerCapture" in e.currentTarget && "pointerId" in e) {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Safe ignore
+      }
+    }
+
+    const pointerId = "pointerId" in e ? e.pointerId : undefined;
+    const touchId = "touches" in e && e.touches[0] ? e.touches[0].identifier : undefined;
+
     touchDragRef.current = {
       type,
       fromIndex: index,
       lastOverIndex: index,
-      startY: touch ? touch.clientY : 0,
+      startY: clientY,
+      pointerId,
+      touchId,
     };
+
+    const itemName =
+      type === "category"
+        ? (sortedCategories[index]?.name ?? "Category")
+        : (filteredItems[index]?.name ?? "Dish");
+
+    setActiveDragFeedback({
+      name: itemName,
+      targetPos: index + 1,
+    });
+
     if (type === "category") {
       setDraggingCatIdx(index);
       setDragOverCatIdx(index);
@@ -399,51 +483,82 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
   }
 
-  function handleTouchMove(e: React.TouchEvent, type: "item" | "category") {
-    if (!touchDragRef.current) return;
-    const touch = e.touches[0];
-    if (!touch) return;
+  function handleReorderMove(
+    e: React.PointerEvent<HTMLElement> | React.TouchEvent<HTMLElement>,
+    type: "item" | "category",
+  ) {
+    if (!touchDragRef.current || touchDragRef.current.type !== type) return;
 
-    // 1. Try DOM element under touch point
-    const targetElem = document.elementFromPoint(touch.clientX, touch.clientY);
-    const row = targetElem?.closest(`[data-drag-type="${type}"]`);
-    if (row) {
-      const rawIdx = row.getAttribute("data-index");
-      if (rawIdx !== null) {
-        const idx = parseInt(rawIdx, 10);
-        if (!isNaN(idx)) {
-          touchDragRef.current.lastOverIndex = idx;
-          if (type === "category") {
-            setDragOverCatIdx(idx);
-          } else {
-            setDragOverItemIdx(idx);
-          }
-          return;
-        }
-      }
+    let clientY: number;
+    let clientX: number;
+
+    if ("touches" in e) {
+      const matchTouch =
+        Array.from(e.touches).find((t) => t.identifier === touchDragRef.current?.touchId) ??
+        e.touches[0];
+      if (!matchTouch) return;
+      clientY = matchTouch.clientY;
+      clientX = matchTouch.clientX;
+    } else {
+      clientY = e.clientY;
+      clientX = e.clientX;
     }
 
-    // 2. Direct swipe displacement calculation
-    const deltaY = touch.clientY - touchDragRef.current.startY;
-    const approxRowHeight = 55;
-    const steps = Math.trunc(deltaY / approxRowHeight);
-    const maxIdx = type === "category" ? categories.length - 1 : filteredItems.length - 1;
-    const targetIdx = Math.max(0, Math.min(maxIdx, touchDragRef.current.fromIndex + steps));
+    // Smooth auto scroll if dragged near edge
+    handleAutoScroll(clientY);
 
-    if (targetIdx !== touchDragRef.current.lastOverIndex) {
+    // 1. Precise bounding box lookup against visible rows
+    const targetIdx = findTargetIndexByPosition(type, clientY);
+
+    if (targetIdx !== null && targetIdx !== touchDragRef.current.lastOverIndex) {
       touchDragRef.current.lastOverIndex = targetIdx;
+      setActiveDragFeedback((prev) => (prev ? { ...prev, targetPos: targetIdx + 1 } : null));
       if (type === "category") {
         setDragOverCatIdx(targetIdx);
       } else {
         setDragOverItemIdx(targetIdx);
       }
+      return;
+    }
+
+    // 2. Fallback: displacement calculation
+    if (targetIdx === null) {
+      const deltaY = clientY - touchDragRef.current.startY;
+      const approxRowHeight = 65;
+      const steps = Math.trunc(deltaY / approxRowHeight);
+      const maxIdx = type === "category" ? sortedCategories.length - 1 : filteredItems.length - 1;
+      const fallbackIdx = Math.max(0, Math.min(maxIdx, touchDragRef.current.fromIndex + steps));
+
+      if (fallbackIdx !== touchDragRef.current.lastOverIndex) {
+        touchDragRef.current.lastOverIndex = fallbackIdx;
+        setActiveDragFeedback((prev) => (prev ? { ...prev, targetPos: fallbackIdx + 1 } : null));
+        if (type === "category") {
+          setDragOverCatIdx(fallbackIdx);
+        } else {
+          setDragOverItemIdx(fallbackIdx);
+        }
+      }
     }
   }
 
-  function handleTouchEnd(type: "item" | "category") {
+  function handleReorderEnd(
+    e: React.PointerEvent<HTMLElement> | React.TouchEvent<HTMLElement> | null,
+    type: "item" | "category",
+  ) {
     if (!touchDragRef.current) return;
-    const { fromIndex, lastOverIndex } = touchDragRef.current;
+    const { fromIndex, lastOverIndex, pointerId } = touchDragRef.current;
     touchDragRef.current = null;
+
+    if (e && "releasePointerCapture" in e.currentTarget && pointerId !== undefined) {
+      try {
+        e.currentTarget.releasePointerCapture(pointerId);
+      } catch {
+        // Safe ignore
+      }
+    }
+
+    setActiveDragFeedback(null);
+
     if (type === "category") {
       setDraggingCatIdx(null);
       setDragOverCatIdx(null);
@@ -463,57 +578,46 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     <div className="min-h-screen bg-background text-primary">
       {/* Top Header */}
       <header className="sticky top-0 z-30 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="grid size-9 place-items-center rounded-xl bg-primary font-bold text-primary-foreground">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2.5 sm:px-6 sm:py-3.5">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="grid size-8 sm:size-9 shrink-0 place-items-center rounded-xl bg-primary font-bold text-xs sm:text-sm text-primary-foreground shadow-xs">
               A
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-serif text-base font-bold text-foreground">
-                  Halal Ali's Delight
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h1 className="font-serif text-sm sm:text-base font-bold text-foreground truncate">
+                  Halal Ali's
                 </h1>
-                <Badge variant="outline" className="border-gold/40 text-[10px] text-gold">
-                  Admin Panel
+                <Badge
+                  variant="outline"
+                  className="border-gold/40 text-[9px] sm:text-[10px] text-gold px-1.5 py-0"
+                >
+                  Admin
                 </Badge>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Logged in as{" "}
-                <span className="font-medium text-foreground">{session.user.email}</span>
+              <p className="text-[10px] sm:text-xs text-muted-foreground truncate max-w-[140px] xs:max-w-[200px] sm:max-w-none">
+                {session.user.email}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant={activeTab === "special_offer" ? "default" : "outline"}
-              size="sm"
-              onClick={() => handleSelectTab("special_offer")}
-              className={`h-8 gap-1.5 text-xs font-semibold transition-all ${
-                activeTab === "special_offer"
-                  ? "bg-gold text-gold-foreground hover:bg-gold/90 shadow-xs"
-                  : "border-gold/40 text-gold hover:bg-gold/10"
-              }`}
-              title="Open Special Offer Manager"
-            >
-              <Tag className="size-3.5" />
-              <span>Special Offer</span>
-            </Button>
-
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <Link
               to="/"
               target="_blank"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 sm:px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              title="Open Live Website in New Tab"
             >
-              <span>Live Website</span>
               <ExternalLink className="size-3 text-muted-foreground" />
+              <span className="hidden xs:inline">Website</span>
             </Link>
 
             <Button
               variant="ghost"
               size="sm"
               onClick={onSignOut}
-              className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-destructive"
+              className="h-8 px-2 sm:px-3 gap-1 text-xs text-muted-foreground hover:text-destructive"
+              title="Sign Out"
             >
               <LogOut className="size-3.5" />
               <span className="hidden sm:inline">Sign Out</span>
@@ -522,47 +626,47 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-3 py-4 sm:px-6 sm:py-8">
+      <main className="mx-auto max-w-7xl px-3 py-3 sm:px-6 sm:py-8">
         {/* Only see total menu items & total category in first */}
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4">
-          <div className="rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-2xs">
+        <div className="mb-4 sm:mb-6 grid grid-cols-2 gap-2.5 sm:gap-4">
+          <div className="rounded-xl sm:rounded-2xl border border-border bg-card p-3 sm:p-6 shadow-2xs">
             <div className="flex items-center justify-between">
               <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Dishes</p>
-              <div className="grid size-8 sm:size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                <UtensilsCrossed className="size-4 sm:size-5" />
+              <div className="grid size-7 sm:size-10 place-items-center rounded-lg sm:rounded-xl bg-primary/10 text-primary">
+                <UtensilsCrossed className="size-3.5 sm:size-5" />
               </div>
             </div>
-            <p className="mt-2 font-serif text-2xl sm:text-3xl font-bold text-foreground">
+            <p className="mt-1 sm:mt-2 font-serif text-xl sm:text-3xl font-bold text-foreground">
               {items.length}
             </p>
-            <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground hidden xs:block">
+            <p className="mt-0.5 text-[10px] sm:text-xs text-muted-foreground hidden xs:block">
               Dishes live on the restaurant menu
             </p>
           </div>
 
-          <div className="rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-2xs">
+          <div className="rounded-xl sm:rounded-2xl border border-border bg-card p-3 sm:p-6 shadow-2xs">
             <div className="flex items-center justify-between">
               <p className="text-xs sm:text-sm font-medium text-muted-foreground">Categories</p>
-              <div className="grid size-8 sm:size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Layers className="size-4 sm:size-5" />
+              <div className="grid size-7 sm:size-10 place-items-center rounded-lg sm:rounded-xl bg-primary/10 text-primary">
+                <Layers className="size-3.5 sm:size-5" />
               </div>
             </div>
-            <p className="mt-2 font-serif text-2xl sm:text-3xl font-bold text-foreground">
+            <p className="mt-1 sm:mt-2 font-serif text-xl sm:text-3xl font-bold text-foreground">
               {categories.length}
             </p>
-            <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground hidden xs:block">
+            <p className="mt-0.5 text-[10px] sm:text-xs text-muted-foreground hidden xs:block">
               Sections organizing the dishes
             </p>
           </div>
         </div>
 
         {/* Navigation Tabs & Actions Bar: 100% visible on all devices */}
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 sm:mb-6 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="grid grid-cols-3 w-full sm:w-auto sm:inline-flex items-center gap-1 rounded-xl bg-muted/70 p-1 border border-border shadow-2xs">
             <button
               type="button"
               onClick={() => handleSelectTab("items")}
-              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
                 activeTab === "items"
                   ? "bg-background text-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
@@ -575,7 +679,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             <button
               type="button"
               onClick={() => handleSelectTab("categories")}
-              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
                 activeTab === "categories"
                   ? "bg-background text-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
@@ -588,7 +692,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             <button
               type="button"
               onClick={() => handleSelectTab("special_offer")}
-              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
                 activeTab === "special_offer"
                   ? "bg-background text-gold shadow-xs ring-1 ring-gold/40 font-bold"
                   : "text-gold hover:text-gold hover:bg-gold/10"
@@ -599,13 +703,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             </button>
           </div>
 
-          <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <Button
               variant="outline"
               size="sm"
               onClick={loadData}
               disabled={loading}
-              className="h-9 gap-1 text-xs"
+              className="h-9 px-2.5 sm:px-3 gap-1 text-xs shrink-0"
+              title="Refresh Data from Database"
             >
               <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
               <span className="hidden xs:inline">Refresh</span>
@@ -648,11 +753,27 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               =
             </span>
             <p className="text-muted-foreground leading-relaxed">
-              <strong className="font-semibold text-foreground">Change Sort Order:</strong> Click
-              and hold the <strong className="font-mono text-foreground">=</strong> symbol on the
-              left of any {activeTab === "items" ? "dish" : "category"} and drag up or down. The new
-              sort order updates immediately in this admin panel and on the customer website.
+              <strong className="font-semibold text-foreground">Reorder Items:</strong> Touch & drag
+              the <strong className="font-mono text-foreground">=</strong> handle up or down on
+              phone/tablet, or drag it on desktop. You can also tap the{" "}
+              <strong className="text-foreground">▲ / ▼</strong> arrow buttons next to each{" "}
+              {activeTab === "items" ? "dish" : "category"} to step one position up or down.
             </p>
+          </div>
+        )}
+
+        {/* Active Floating Drag HUD for mobile & desktop feedback */}
+        {activeDragFeedback && (
+          <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 rounded-full border border-gold/60 bg-foreground/95 px-4 py-2.5 text-xs text-background shadow-xl backdrop-blur-md animate-in fade-in zoom-in duration-150">
+            <span className="flex size-5 items-center justify-center rounded-full bg-gold text-[11px] font-bold text-black font-mono">
+              =
+            </span>
+            <span className="truncate max-w-[200px] font-medium text-white">
+              {activeDragFeedback.name}
+            </span>
+            <span className="rounded bg-gold/20 px-2 py-0.5 font-mono text-[11px] font-bold text-gold">
+              Position #{activeDragFeedback.targetPos}
+            </span>
           </div>
         )}
 
@@ -753,7 +874,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                         {/* Single Row: Reorder Handle + Image + Details + Edit/Delete Actions */}
                         <div className="flex items-center gap-2.5 sm:gap-3">
                           {/* Reorder Handle: Swipe '=' or tap arrows */}
-                          <div className="flex flex-col items-center gap-0.5 shrink-0">
+                          <div className="flex flex-col items-center gap-1 shrink-0">
                             <button
                               type="button"
                               disabled={idx === 0}
@@ -761,11 +882,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 e.stopPropagation();
                                 moveItemStep(idx, -1);
                               }}
-                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
-                              title="Move up"
+                              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
+                              title="Move up 1 position"
                               aria-label={`Move ${item.name} up`}
                             >
-                              <ChevronUp className="size-3.5" />
+                              <ChevronUp className="size-4" />
                             </button>
 
                             <div
@@ -779,11 +900,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 setDraggingItemIdx(null);
                                 setDragOverItemIdx(null);
                               }}
-                              onTouchStart={(e) => handleTouchStart(e, "item", idx)}
-                              onTouchMove={(e) => handleTouchMove(e, "item")}
-                              onTouchEnd={() => handleTouchEnd("item")}
-                              className="flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:border-gold active:bg-gold/20 cursor-grab active:cursor-grabbing select-none"
-                              title="Swipe '=' up or down, or tap arrows above/below to reorder"
+                              onPointerDown={(e) => handleReorderStart(e, "item", idx)}
+                              onPointerMove={(e) => handleReorderMove(e, "item")}
+                              onPointerUp={(e) => handleReorderEnd(e, "item")}
+                              onPointerCancel={(e) => handleReorderEnd(e, "item")}
+                              onTouchStart={(e) => handleReorderStart(e, "item", idx)}
+                              onTouchMove={(e) => handleReorderMove(e, "item")}
+                              onTouchEnd={(e) => handleReorderEnd(e, "item")}
+                              onTouchCancel={(e) => handleReorderEnd(e, "item")}
+                              className="flex size-8 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:border-gold active:bg-gold/20 cursor-grab active:cursor-grabbing select-none"
+                              title="Drag '=' up/down to reorder, or tap arrows above/below"
                               aria-label={`Reorder ${item.name}`}
                             >
                               =
@@ -796,11 +922,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 e.stopPropagation();
                                 moveItemStep(idx, 1);
                               }}
-                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
-                              title="Move down"
+                              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
+                              title="Move down 1 position"
                               aria-label={`Move ${item.name} down`}
                             >
-                              <ChevronDown className="size-3.5" />
+                              <ChevronDown className="size-4" />
                             </button>
 
                             <span className="text-[10px] font-mono font-medium text-muted-foreground">
@@ -964,11 +1090,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                       setDraggingItemIdx(null);
                                       setDragOverItemIdx(null);
                                     }}
-                                    onTouchStart={(e) => handleTouchStart(e, "item", idx)}
-                                    onTouchMove={(e) => handleTouchMove(e, "item")}
-                                    onTouchEnd={() => handleTouchEnd("item")}
+                                    onPointerDown={(e) => handleReorderStart(e, "item", idx)}
+                                    onPointerMove={(e) => handleReorderMove(e, "item")}
+                                    onPointerUp={(e) => handleReorderEnd(e, "item")}
+                                    onPointerCancel={(e) => handleReorderEnd(e, "item")}
+                                    onTouchStart={(e) => handleReorderStart(e, "item", idx)}
+                                    onTouchMove={(e) => handleReorderMove(e, "item")}
+                                    onTouchEnd={(e) => handleReorderEnd(e, "item")}
+                                    onTouchCancel={(e) => handleReorderEnd(e, "item")}
                                     className="group/grab inline-flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
-                                    title="Hold '=' and drag or swipe up or down to reorder"
+                                    title="Drag '=' up or down, or use ▲ / ▼ to reorder"
                                     aria-label={`Hold or swipe to reorder ${item.name}`}
                                   >
                                     =
@@ -1104,7 +1235,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                         {/* Single Row: Reorder Handle + Category Details + Edit/Delete Actions */}
                         <div className="flex items-center gap-2.5 sm:gap-3">
                           {/* Reorder Handle: Swipe '=' or tap arrows */}
-                          <div className="flex flex-col items-center gap-0.5 shrink-0">
+                          <div className="flex flex-col items-center gap-1 shrink-0">
                             <button
                               type="button"
                               disabled={idx === 0}
@@ -1112,11 +1243,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 e.stopPropagation();
                                 moveCategoryStep(idx, -1);
                               }}
-                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
-                              title="Move up"
+                              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
+                              title="Move up 1 position"
                               aria-label={`Move category ${cat.name} up`}
                             >
-                              <ChevronUp className="size-3.5" />
+                              <ChevronUp className="size-4" />
                             </button>
 
                             <div
@@ -1130,11 +1261,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 setDraggingCatIdx(null);
                                 setDragOverCatIdx(null);
                               }}
-                              onTouchStart={(e) => handleTouchStart(e, "category", idx)}
-                              onTouchMove={(e) => handleTouchMove(e, "category")}
-                              onTouchEnd={() => handleTouchEnd("category")}
-                              className="flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:border-gold active:bg-gold/20 cursor-grab active:cursor-grabbing select-none"
-                              title="Swipe '=' up or down, or tap arrows above/below to reorder"
+                              onPointerDown={(e) => handleReorderStart(e, "category", idx)}
+                              onPointerMove={(e) => handleReorderMove(e, "category")}
+                              onPointerUp={(e) => handleReorderEnd(e, "category")}
+                              onPointerCancel={(e) => handleReorderEnd(e, "category")}
+                              onTouchStart={(e) => handleReorderStart(e, "category", idx)}
+                              onTouchMove={(e) => handleReorderMove(e, "category")}
+                              onTouchEnd={(e) => handleReorderEnd(e, "category")}
+                              onTouchCancel={(e) => handleReorderEnd(e, "category")}
+                              className="flex size-8 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:border-gold active:bg-gold/20 cursor-grab active:cursor-grabbing select-none"
+                              title="Drag '=' up/down to reorder, or tap arrows above/below"
                               aria-label={`Reorder category ${cat.name}`}
                             >
                               =
@@ -1147,11 +1283,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 e.stopPropagation();
                                 moveCategoryStep(idx, 1);
                               }}
-                              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none"
-                              title="Move down"
+                              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
+                              title="Move down 1 position"
                               aria-label={`Move category ${cat.name} down`}
                             >
-                              <ChevronDown className="size-3.5" />
+                              <ChevronDown className="size-4" />
                             </button>
 
                             <span className="text-[10px] font-mono font-medium text-muted-foreground">
@@ -1300,11 +1436,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                       setDraggingCatIdx(null);
                                       setDragOverCatIdx(null);
                                     }}
-                                    onTouchStart={(e) => handleTouchStart(e, "category", idx)}
-                                    onTouchMove={(e) => handleTouchMove(e, "category")}
-                                    onTouchEnd={() => handleTouchEnd("category")}
+                                    onPointerDown={(e) => handleReorderStart(e, "category", idx)}
+                                    onPointerMove={(e) => handleReorderMove(e, "category")}
+                                    onPointerUp={(e) => handleReorderEnd(e, "category")}
+                                    onPointerCancel={(e) => handleReorderEnd(e, "category")}
+                                    onTouchStart={(e) => handleReorderStart(e, "category", idx)}
+                                    onTouchMove={(e) => handleReorderMove(e, "category")}
+                                    onTouchEnd={(e) => handleReorderEnd(e, "category")}
+                                    onTouchCancel={(e) => handleReorderEnd(e, "category")}
                                     className="group/grab inline-flex size-7 touch-none items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
-                                    title="Hold '=' and drag or swipe up or down to reorder"
+                                    title="Drag '=' up or down, or use ▲ / ▼ to reorder"
                                     aria-label={`Hold or swipe to reorder category ${cat.name}`}
                                   >
                                     =

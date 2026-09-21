@@ -273,36 +273,36 @@ export function SpecialOfferManager() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header Info */}
-      <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl sm:rounded-2xl border border-border bg-card p-3.5 sm:p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <Tag className="size-5 text-gold" />
-            <h2 className="font-serif text-lg font-bold">Home Page Special Offers & Slides</h2>
+            <Tag className="size-4 sm:size-5 text-gold shrink-0" />
+            <h2 className="font-serif text-base sm:text-lg font-bold">Special Offers & Slides</h2>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Manage multiple special offer images and deals. Visitors can swipe left to browse
-            offers, view interactive dots, and claim combos directly.
+          <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground">
+            Manage multi-slide special offer banners, discounts, and photos shown on the home page
+            hero.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <Button
             variant={offer.available ? "outline" : "default"}
             size="sm"
             onClick={() => setOffer((prev) => ({ ...prev, available: !prev.available }))}
-            className="h-9 gap-1.5 text-xs"
+            className="h-8 sm:h-9 gap-1 text-xs flex-1 sm:flex-none justify-center"
           >
             {offer.available ? (
               <>
                 <EyeOff className="size-3.5 text-muted-foreground" />
-                <span>Hide Banner</span>
+                <span>Hide</span>
               </>
             ) : (
               <>
                 <Eye className="size-3.5" />
-                <span>Enable Banner</span>
+                <span>Show</span>
               </>
             )}
           </Button>
@@ -311,24 +311,25 @@ export function SpecialOfferManager() {
             variant="outline"
             size="sm"
             onClick={handleResetDefault}
-            className="h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            className="h-8 sm:h-9 px-2.5 sm:px-3 gap-1 text-xs text-muted-foreground hover:text-foreground shrink-0"
+            title="Reset to Default Offers"
           >
             <RotateCcw className="size-3.5" />
-            <span>Reset Defaults</span>
+            <span className="hidden xs:inline">Reset</span>
           </Button>
 
           <Button
             size="sm"
             onClick={handleSave}
             disabled={saving}
-            className="h-9 gap-1.5 bg-primary text-xs font-semibold"
+            className="h-8 sm:h-9 gap-1.5 bg-primary text-xs font-semibold flex-1 sm:flex-none justify-center"
           >
             {saving ? (
               <RefreshCw className="size-3.5 animate-spin" />
             ) : (
               <Save className="size-3.5" />
             )}
-            <span>Save All Changes</span>
+            <span>Save All</span>
           </Button>
         </div>
       </div>
