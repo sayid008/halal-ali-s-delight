@@ -5,6 +5,8 @@ import { SiteFooter } from "@/components/site-footer";
 import { menuSections as staticSections, restaurant } from "@/data/menu";
 import { usePublicMenu } from "@/hooks/use-public-menu";
 import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
+import { getRestaurantStatus } from "@/lib/opening-hours";
+import { Clock, MapPin, Phone, ArrowUpRight, ChevronRight } from "lucide-react";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
 const description =
@@ -78,23 +80,105 @@ function Index() {
         <HomeMenuBrowser sections={displaySections} />
 
         <section className="mx-auto max-w-5xl px-6 py-10 pb-28">
-          <div className="space-y-4 rounded-2xl bg-primary p-6 text-primary-foreground">
-            <div className="flex items-center gap-3">
-              <div className="grid size-8 place-items-center rounded-full bg-gold/25 text-gold">
-                ●
+          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+            <div className="grid gap-6 md:grid-cols-3">
+              {/* Location Card */}
+              <div className="flex items-start gap-3.5">
+                <a
+                  href={restaurant.mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gold/15 text-gold transition-transform hover:scale-105 active:scale-95"
+                  title="Open in Google Maps"
+                >
+                  <MapPin className="size-5" />
+                </a>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Location
+                  </p>
+                  <a
+                    href={restaurant.mapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-0.5 block text-sm font-medium text-foreground hover:text-gold transition-colors"
+                  >
+                    {restaurant.address}
+                  </a>
+                  <a
+                    href={restaurant.mapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-gold hover:underline"
+                  >
+                    <span>Get Directions</span>
+                    <ArrowUpRight className="size-3" />
+                  </a>
+                </div>
               </div>
-              <div>
-                <p className="text-xs opacity-70">Location</p>
-                <p className="text-sm font-medium">{restaurant.address}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="grid size-8 place-items-center rounded-full bg-gold/25 text-gold">
-                ●
-              </div>
-              <div>
-                <p className="text-xs opacity-70">Opening Hours</p>
-                <p className="text-sm font-medium">{restaurant.hours}</p>
+
+              {/* Opening Hours with Live Status */}
+              {(() => {
+                const status = getRestaurantStatus();
+                return (
+                  <div className="flex items-start gap-3.5 border-t border-border pt-4 md:border-t-0 md:border-l md:pl-6 md:pt-0">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gold/15 text-gold">
+                      <Clock className="size-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Opening Hours
+                        </p>
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            status.isOpen
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          <span
+                            className={`size-1.5 rounded-full ${
+                              status.isOpen ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"
+                            }`}
+                          />
+                          {status.statusText}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-sm font-medium text-foreground">
+                        Today: {status.todaySchedule.openTime} – {status.todaySchedule.closeTime}
+                      </p>
+                      <Link
+                        to="/contact"
+                        className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-gold hover:underline"
+                      >
+                        <span>View weekly schedule</span>
+                        <ChevronRight className="size-3" />
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Phone / Call to Order */}
+              <div className="flex items-start gap-3.5 border-t border-border pt-4 md:border-t-0 md:border-l md:pl-6 md:pt-0">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gold/15 text-gold">
+                  <Phone className="size-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Orders & Bookings
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium text-foreground">
+                    Dine in or takeaway orders
+                  </p>
+                  <a
+                    href={`tel:${restaurant.phone.replace(/\s/g, "")}`}
+                    className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-gold hover:underline"
+                  >
+                    <span>Call {restaurant.phone}</span>
+                  </a>
+                </div>
               </div>
             </div>
           </div>

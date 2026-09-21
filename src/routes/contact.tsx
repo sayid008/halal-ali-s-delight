@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { OpeningHoursCard } from "@/components/opening-hours-card";
 import { restaurant } from "@/data/menu";
+import { MapPin, ArrowUpRight, Phone } from "lucide-react";
 
 const title = "Contact & Find Us — Halal Ali Dine Inn & Take Away";
 const description =
@@ -20,12 +22,6 @@ export const Route = createFileRoute("/contact")({
   }),
   component: ContactPage,
 });
-
-const hours = [
-  { day: "Monday – Thursday", time: "12:00 – 23:00" },
-  { day: "Friday – Saturday", time: "12:00 – 23:00" },
-  { day: "Sunday", time: "12:00 – 23:00" },
-];
 
 function ContactPage() {
   const tel = restaurant.phone.replace(/\s/g, "");
@@ -49,12 +45,14 @@ function ContactPage() {
             <h2 className="font-serif text-xl">Address</h2>
             <p className="mt-2 text-sm text-primary/80">{restaurant.address}</p>
             <a
-              href={`https://maps.google.com/?q=${encodeURIComponent(restaurant.address)}`}
+              href={restaurant.mapsUrl}
               target="_blank"
-              rel="noreferrer"
-              className="mt-4 inline-block text-sm font-medium text-gold underline"
+              rel="noopener noreferrer"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-4 py-2 text-xs font-semibold text-gold transition-colors hover:bg-gold hover:text-gold-foreground"
             >
-              Open in maps
+              <MapPin className="size-3.5" />
+              <span>Get Directions in Maps</span>
+              <ArrowUpRight className="size-3" />
             </a>
           </div>
 
@@ -70,16 +68,8 @@ function ContactPage() {
           </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-border bg-card p-6">
-          <h2 className="font-serif text-xl">Opening hours</h2>
-          <ul className="mt-4 space-y-2 text-sm">
-            {hours.map((row) => (
-              <li key={row.day} className="flex justify-between border-b border-border pb-2">
-                <span className="text-primary/70">{row.day}</span>
-                <span className="font-medium">{row.time}</span>
-              </li>
-            ))}
-          </ul>
+        <div className="mt-6">
+          <OpeningHoursCard />
         </div>
       </main>
 

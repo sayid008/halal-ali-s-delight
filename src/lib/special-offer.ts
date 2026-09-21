@@ -1,6 +1,18 @@
 import { useState, useEffect } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import heroBiryani from "@/assets/hero-biryani.jpg";
+import mixedGrill from "@/assets/dish-mixed-grill.jpg";
+import butterChicken from "@/assets/dish-butter-chicken.jpg";
+
+export interface SpecialOfferSlide {
+  id: string;
+  badge: string;
+  title: string;
+  description: string;
+  price: number;
+  original_price?: number;
+  image_url: string;
+}
 
 export interface SpecialOffer {
   id?: string;
@@ -10,22 +22,75 @@ export interface SpecialOffer {
   price: number;
   original_price?: number;
   image_url: string;
+  slides?: SpecialOfferSlide[];
   available: boolean;
   show_overlay: boolean;
+  autoplay?: boolean;
   updated_at?: string;
 }
 
+export const DEFAULT_SLIDES: SpecialOfferSlide[] = [
+  {
+    id: "slide-1",
+    badge: "Special Combo Offer",
+    title: "Royal Feast Special Combo",
+    description:
+      "Includes Royal Lamb Biryani, 2x Flame-Grilled Lamb Seekh Kebabs, Butter Naan & Cooling Mint Raita.",
+    price: 499,
+    original_price: 650,
+    image_url: heroBiryani,
+  },
+  {
+    id: "slide-2",
+    badge: "Grill Special Deal",
+    title: "Charcoal Mixed Grill Platter",
+    description:
+      "Sizzling platter of marinated lamb chops, tender chicken tikka, seekh kebabs, garlic naan & mint chutney.",
+    price: 599,
+    original_price: 750,
+    image_url: mixedGrill,
+  },
+  {
+    id: "slide-3",
+    badge: "Chef's Recommendation",
+    title: "Delhi Butter Chicken Combo",
+    description:
+      "Creamy butter chicken slow-simmered in aromatic spices with 2x garlic butter naans & jeera pilau.",
+    price: 449,
+    original_price: 550,
+    image_url: butterChicken,
+  },
+];
+
 export const DEFAULT_SPECIAL_OFFER: SpecialOffer = {
-  badge: "Special Combo Offer",
-  title: "Royal Feast Special Combo",
-  description:
-    "Includes Royal Lamb Biryani, 2x Flame-Grilled Lamb Seekh Kebabs, Butter Naan & Cooling Mint Raita.",
-  price: 499,
-  original_price: 650,
-  image_url: heroBiryani,
+  badge: DEFAULT_SLIDES[0].badge,
+  title: DEFAULT_SLIDES[0].title,
+  description: DEFAULT_SLIDES[0].description,
+  price: DEFAULT_SLIDES[0].price,
+  original_price: DEFAULT_SLIDES[0].original_price,
+  image_url: DEFAULT_SLIDES[0].image_url,
+  slides: DEFAULT_SLIDES,
   available: true,
   show_overlay: true,
+  autoplay: true,
 };
+
+export function getOfferSlides(offer: SpecialOffer): SpecialOfferSlide[] {
+  if (offer.slides && Array.isArray(offer.slides) && offer.slides.length > 0) {
+    return offer.slides;
+  }
+  return [
+    {
+      id: "slide-1",
+      badge: offer.badge || "Special Combo Offer",
+      title: offer.title || "Special Offer",
+      description: offer.description || "",
+      price: offer.price || 499,
+      original_price: offer.original_price,
+      image_url: offer.image_url || heroBiryani,
+    },
+  ];
+}
 
 const STORAGE_KEY = "halal_ali_special_offer";
 
@@ -41,10 +106,24 @@ export function getLocalSpecialOffer(): SpecialOffer {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
+      const slides: SpecialOfferSlide[] =
+        Array.isArray(parsed.slides) && parsed.slides.length > 0
+          ? parsed.slides.map((s: Partial<SpecialOfferSlide>, idx: number) => ({
+              id: s.id || `slide-${idx + 1}`,
+              badge: s.badge || parsed.badge || "Special Combo Offer",
+              title: s.title || parsed.title || "Special Offer",
+              description: s.description ?? parsed.description ?? "",
+              price: Number(s.price) || Number(parsed.price) || 499,
+              original_price: s.original_price ? Number(s.original_price) : undefined,
+              image_url: s.image_url || parsed.image_url || heroBiryani,
+            }))
+          : DEFAULT_SLIDES;
+
       return {
         ...DEFAULT_SPECIAL_OFFER,
         ...parsed,
-        image_url: parsed.image_url || DEFAULT_SPECIAL_OFFER.image_url,
+        image_url: slides[0]?.image_url || parsed.image_url || DEFAULT_SPECIAL_OFFER.image_url,
+        slides,
       };
     }
   } catch (err) {
@@ -78,8 +157,10 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
         price: Number(data.price) || DEFAULT_SPECIAL_OFFER.price,
         original_price: data.original_price ? Number(data.original_price) : undefined,
         image_url: data.image_url || DEFAULT_SPECIAL_OFFER.image_url,
+        slides: data.slides || local.slides || DEFAULT_SLIDES,
         available: data.available !== false,
         show_overlay: data.show_overlay !== false,
+        autoplay: data.autoplay !== undefined ? data.autoplay : (local.autoplay ?? true),
         updated_at: data.updated_at,
       };
       // Cache locally
@@ -169,7 +250,7 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
 
 export function useSpecialOffer() {
   const [offer, setOffer] = useState<SpecialOffer>(getLocalSpecialOffer);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -177,7 +258,6 @@ export function useSpecialOffer() {
     fetchSpecialOffer().then((data) => {
       if (mounted) {
         setOffer(data);
-        setLoading(false);
       }
     });
 

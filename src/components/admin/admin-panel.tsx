@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   supabase,
@@ -6,6 +6,7 @@ import {
   type DatabaseMenuItem,
   type DatabaseCategory,
 } from "@/lib/supabase";
+import { persistCategoryOrder, persistItemOrder } from "@/lib/menu-order";
 import { MenuItemDialog } from "./menu-item-dialog";
 import { CategoryDialog } from "./category-dialog";
 import { SpecialOfferManager } from "./special-offer-manager";
@@ -24,7 +25,7 @@ import {
   Layers,
   RefreshCw,
   ImageIcon,
-  Sparkles,
+  Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 import { menuSections as homeSections } from "@/data/menu";
@@ -238,9 +239,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
   }
 
-  // Filtered menu items
+  // Filtered menu items, ordered by sort_order
   const filteredItems = useMemo(() => {
-    return items.filter((item) => {
+    const list = items.filter((item) => {
       const matchesSearch =
         !searchQuery ||
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -250,7 +251,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       return matchesSearch && matchesCategory;
     });
+
+    return list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   }, [items, searchQuery, selectedCategory]);
+
+  // Categories sorted by sort_order
+  const sortedCategories = useMemo(() => {
+    return [...categories].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  }, [categories]);
 
   // Lookup map for category name
   const categoryMap = useMemo(() => {
@@ -261,6 +269,130 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     });
     return map;
   }, [categories]);
+
+  // Reorder dragging state
+  const [draggingCatIdx, setDraggingCatIdx] = useState<number | null>(null);
+  const [dragOverCatIdx, setDragOverCatIdx] = useState<number | null>(null);
+
+  const [draggingItemIdx, setDraggingItemIdx] = useState<number | null>(null);
+  const [dragOverItemIdx, setDragOverItemIdx] = useState<number | null>(null);
+
+  const touchDragRef = useRef<{
+    type: "item" | "category";
+    fromIndex: number;
+    lastOverIndex: number | null;
+  } | null>(null);
+
+  // Handle reordering categories
+  async function handleReorderCategories(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+    const current = [...sortedCategories];
+    const [movedCat] = current.splice(fromIdx, 1);
+    current.splice(toIdx, 0, movedCat);
+
+    const reordered = current.map((cat, idx) => ({
+      ...cat,
+      sort_order: idx + 1,
+    }));
+
+    setCategories(reordered);
+    toast.success(`Category "${movedCat.name}" reordered to position #${toIdx + 1}`);
+
+    try {
+      await persistCategoryOrder(reordered);
+    } catch (err) {
+      console.warn("Failed to persist category order:", err);
+    }
+  }
+
+  // Handle reordering menu items
+  async function handleReorderItems(fromFilteredIdx: number, toFilteredIdx: number) {
+    if (fromFilteredIdx === toFilteredIdx || fromFilteredIdx < 0 || toFilteredIdx < 0) return;
+
+    const fromItem = filteredItems[fromFilteredIdx];
+    const toItem = filteredItems[toFilteredIdx];
+    if (!fromItem || !toItem) return;
+
+    const masterItems = [...items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const masterFromIdx = masterItems.findIndex((i) => i.id === fromItem.id);
+    const masterToIdx = masterItems.findIndex((i) => i.id === toItem.id);
+
+    if (masterFromIdx === -1 || masterToIdx === -1) return;
+
+    const [movedItem] = masterItems.splice(masterFromIdx, 1);
+    masterItems.splice(masterToIdx, 0, movedItem);
+
+    const reordered = masterItems.map((item, idx) => ({
+      ...item,
+      sort_order: idx + 1,
+    }));
+
+    setItems(reordered);
+    toast.success(`"${movedItem.name}" reordered to position #${toFilteredIdx + 1}`);
+
+    try {
+      await persistItemOrder(reordered);
+    } catch (err) {
+      console.warn("Failed to persist item order:", err);
+    }
+  }
+
+  // Touch reordering handlers for mobile / touch devices
+  function handleTouchStart(type: "item" | "category", index: number) {
+    touchDragRef.current = {
+      type,
+      fromIndex: index,
+      lastOverIndex: index,
+    };
+    if (type === "category") {
+      setDraggingCatIdx(index);
+      setDragOverCatIdx(index);
+    } else {
+      setDraggingItemIdx(index);
+      setDragOverItemIdx(index);
+    }
+  }
+
+  function handleTouchMove(e: React.TouchEvent, type: "item" | "category") {
+    if (!touchDragRef.current) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    const targetElem = document.elementFromPoint(touch.clientX, touch.clientY);
+    const row = targetElem?.closest(`[data-drag-type="${type}"]`);
+    if (row) {
+      const rawIdx = row.getAttribute("data-index");
+      if (rawIdx !== null) {
+        const idx = parseInt(rawIdx, 10);
+        if (!isNaN(idx)) {
+          touchDragRef.current.lastOverIndex = idx;
+          if (type === "category") {
+            setDragOverCatIdx(idx);
+          } else {
+            setDragOverItemIdx(idx);
+          }
+        }
+      }
+    }
+  }
+
+  function handleTouchEnd(type: "item" | "category") {
+    if (!touchDragRef.current) return;
+    const { fromIndex, lastOverIndex } = touchDragRef.current;
+    touchDragRef.current = null;
+    if (type === "category") {
+      setDraggingCatIdx(null);
+      setDragOverCatIdx(null);
+      if (lastOverIndex !== null && fromIndex !== lastOverIndex) {
+        handleReorderCategories(fromIndex, lastOverIndex);
+      }
+    } else {
+      setDraggingItemIdx(null);
+      setDragOverItemIdx(null);
+      if (lastOverIndex !== null && fromIndex !== lastOverIndex) {
+        handleReorderItems(fromIndex, lastOverIndex);
+      }
+    }
+  }
 
   return (
     <div className="min-h-screen bg-background text-primary">
@@ -310,40 +442,46 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+      <main className="mx-auto max-w-7xl px-3 py-4 sm:px-6 sm:py-8">
         {/* Only see total menu items & total category in first */}
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-2xs">
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4">
+          <div className="rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-2xs">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-muted-foreground">Total Menu Items</p>
-              <div className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                <UtensilsCrossed className="size-5" />
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Dishes</p>
+              <div className="grid size-8 sm:size-10 place-items-center rounded-xl bg-primary/10 text-primary">
+                <UtensilsCrossed className="size-4 sm:size-5" />
               </div>
             </div>
-            <p className="mt-2 font-serif text-3xl font-bold text-foreground">{items.length}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Dishes live on the restaurant menu</p>
+            <p className="mt-2 font-serif text-2xl sm:text-3xl font-bold text-foreground">
+              {items.length}
+            </p>
+            <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground hidden xs:block">
+              Dishes live on the restaurant menu
+            </p>
           </div>
 
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-2xs">
+          <div className="rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-2xs">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-muted-foreground">Total Categories</p>
-              <div className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Layers className="size-5" />
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Categories</p>
+              <div className="grid size-8 sm:size-10 place-items-center rounded-xl bg-primary/10 text-primary">
+                <Layers className="size-4 sm:size-5" />
               </div>
             </div>
-            <p className="mt-2 font-serif text-3xl font-bold text-foreground">
+            <p className="mt-2 font-serif text-2xl sm:text-3xl font-bold text-foreground">
               {categories.length}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">Sections organizing the dishes</p>
+            <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground hidden xs:block">
+              Sections organizing the dishes
+            </p>
           </div>
         </div>
 
         {/* Navigation Tabs & Actions Bar */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-2 border-b border-border sm:border-0">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex w-full items-center gap-1 border-b border-border overflow-x-auto no-scrollbar pb-1 sm:w-auto sm:border-0 sm:pb-0">
             <button
               onClick={() => setActiveTab("items")}
-              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
+              className={`flex shrink-0 items-center gap-2 border-b-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-colors ${
                 activeTab === "items"
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -355,7 +493,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
             <button
               onClick={() => setActiveTab("categories")}
-              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
+              className={`flex shrink-0 items-center gap-2 border-b-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-colors ${
                 activeTab === "categories"
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -367,18 +505,18 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
             <button
               onClick={() => setActiveTab("special_offer")}
-              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
+              className={`flex shrink-0 items-center gap-2 border-b-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-colors ${
                 activeTab === "special_offer"
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Sparkles className="size-4 text-gold" />
-              <span>Special Offer / Combo Banner</span>
+              <Tag className="size-4 text-gold" />
+              <span>Special Offer</span>
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
             <Button
               variant="outline"
               size="sm"
@@ -387,7 +525,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               className="h-9 gap-1 text-xs"
             >
               <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Refresh</span>
+              <span className="hidden xs:inline">Refresh</span>
             </Button>
 
             {activeTab === "items" && (
@@ -397,7 +535,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                   setEditingItem(null);
                   setItemDialogOpen(true);
                 }}
-                className="h-9 gap-1.5 bg-primary text-xs font-medium"
+                className="h-9 gap-1.5 bg-primary text-xs font-medium flex-1 sm:flex-none justify-center"
               >
                 <Plus className="size-4" />
                 <span>Add Menu Item</span>
@@ -411,7 +549,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                   setEditingCategory(null);
                   setCategoryDialogOpen(true);
                 }}
-                className="h-9 gap-1.5 bg-primary text-xs font-medium"
+                className="h-9 gap-1.5 bg-primary text-xs font-medium flex-1 sm:flex-none justify-center"
               >
                 <Plus className="size-4" />
                 <span>Add Category</span>
@@ -420,17 +558,32 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           </div>
         </div>
 
+        {/* Reordering Guide Banner */}
+        {(activeTab === "items" || activeTab === "categories") && (
+          <div className="flex items-start sm:items-center gap-2.5 rounded-lg border border-gold/30 bg-gold/5 px-3.5 py-2.5 text-xs text-foreground">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded border border-gold/40 bg-background font-mono text-xs font-bold text-gold mt-0.5 sm:mt-0">
+              =
+            </span>
+            <p className="text-muted-foreground leading-relaxed">
+              <strong className="font-semibold text-foreground">Change Sort Order:</strong> Click
+              and hold the <strong className="font-mono text-foreground">=</strong> symbol on the
+              left of any {activeTab === "items" ? "dish" : "category"} and drag up or down. The new
+              sort order updates immediately in this admin panel and on the customer website.
+            </p>
+          </div>
+        )}
+
         {/* TAB 1: MENU ITEMS */}
         {activeTab === "items" && (
           <div className="space-y-4">
             {/* Search & Category Filter Bar */}
-            <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 sm:flex-row sm:items-center">
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search dishes by name or description..."
+                  placeholder="Search dishes by name or category..."
                   className="h-9 pl-9 text-xs"
                 />
               </div>
@@ -439,7 +592,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="h-9 w-full sm:w-auto rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
                   <option value="all">All Categories ({items.length})</option>
                   {categories.map((c) => (
@@ -479,97 +632,286 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                 </div>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border bg-card shadow-2xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3 sm:w-16">Image</th>
-                        <th className="px-4 py-3">Dish Name & Description</th>
-                        <th className="px-4 py-3">Category</th>
-                        <th className="px-4 py-3">Price (₹)</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {filteredItems.map((item) => (
-                        <tr key={item.id} className="transition-colors hover:bg-muted/20">
-                          {/* Dish Image */}
-                          <td className="px-4 py-3">
-                            <div className="size-12 overflow-hidden rounded-lg border border-border bg-muted">
-                              {item.image_url ? (
-                                <img
-                                  src={item.image_url}
-                                  alt={item.name}
-                                  className="size-full object-cover"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <div className="grid size-full place-items-center text-muted-foreground">
-                                  <ImageIcon className="size-5 opacity-40" />
-                                </div>
-                              )}
+              <>
+                {/* MOBILE VIEW: Cards with 100% visible details and NO horizontal swiping */}
+                <div className="space-y-3 md:hidden">
+                  {filteredItems.map((item, idx) => {
+                    const isDragging = draggingItemIdx === idx;
+                    const isOver = dragOverItemIdx === idx;
+                    const isDropTargetTop =
+                      isOver && draggingItemIdx !== null && draggingItemIdx > idx;
+                    const isDropTargetBottom =
+                      isOver && draggingItemIdx !== null && draggingItemIdx < idx;
+
+                    return (
+                      <div
+                        key={item.id}
+                        data-index={idx}
+                        data-drag-type="item"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (dragOverItemIdx !== idx) setDragOverItemIdx(idx);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (draggingItemIdx !== null && draggingItemIdx !== idx) {
+                            handleReorderItems(draggingItemIdx, idx);
+                          }
+                          setDraggingItemIdx(null);
+                          setDragOverItemIdx(null);
+                        }}
+                        className={`relative rounded-xl border border-border bg-card p-3.5 transition-all ${
+                          isDragging ? "opacity-35 ring-2 ring-primary" : "hover:border-gold/40"
+                        } ${isDropTargetTop ? "border-t-2 border-t-gold bg-gold/5" : ""} ${
+                          isDropTargetBottom ? "border-b-2 border-b-gold bg-gold/5" : ""
+                        }`}
+                      >
+                        {/* Single Row: Reorder Handle + Image + Details + Edit/Delete Actions */}
+                        <div className="flex items-center gap-2.5 sm:gap-3">
+                          {/* Reorder Handle */}
+                          <div className="flex flex-col items-center gap-1 shrink-0">
+                            <div
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData("text/plain", String(idx));
+                                setDraggingItemIdx(idx);
+                              }}
+                              onDragEnd={() => {
+                                setDraggingItemIdx(null);
+                                setDragOverItemIdx(null);
+                              }}
+                              onTouchStart={() => handleTouchStart("item", idx)}
+                              onTouchMove={(e) => handleTouchMove(e, "item")}
+                              onTouchEnd={() => handleTouchEnd("item")}
+                              className="flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-sm font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:bg-gold/10 cursor-grab active:cursor-grabbing select-none"
+                              title="Hold '=' and drag to reorder"
+                              aria-label={`Reorder ${item.name}`}
+                            >
+                              =
                             </div>
-                          </td>
-
-                          {/* Name & Description */}
-                          <td className="px-4 py-3 max-w-sm">
-                            <p className="font-semibold text-foreground text-sm">{item.name}</p>
-                            {item.description && (
-                              <p className="line-clamp-2 mt-0.5 text-xs text-muted-foreground">
-                                {item.description}
-                              </p>
-                            )}
-                          </td>
-
-                          {/* Category Badge */}
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <span className="inline-flex rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
-                              {item.category_id
-                                ? categoryMap.get(item.category_id) || "Category"
-                                : "Category"}
+                            <span className="text-[10px] font-mono font-medium text-muted-foreground">
+                              #{idx + 1}
                             </span>
-                          </td>
+                          </div>
 
-                          {/* Price */}
-                          <td className="px-4 py-3 font-semibold text-gold text-sm whitespace-nowrap">
-                            {formatPrice(item.price)}
-                          </td>
+                          {/* Thumbnail Image */}
+                          <div className="size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+                            {item.image_url ? (
+                              <img
+                                src={item.image_url}
+                                alt={item.name}
+                                className="size-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="grid size-full place-items-center text-muted-foreground">
+                                <ImageIcon className="size-4 opacity-40" />
+                              </div>
+                            )}
+                          </div>
 
-                          {/* Edit / Delete Buttons */}
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setEditingItem(item);
-                                  setItemDialogOpen(true);
-                                }}
-                                className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
-                                title="Edit Dish"
-                              >
-                                <Edit2 className="size-3.5" />
-                                <span className="hidden sm:inline">Edit</span>
-                              </Button>
-
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteItem(item)}
-                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                title="Delete Dish"
-                              >
-                                <Trash2 className="size-3.5" />
-                              </Button>
+                          {/* Details */}
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-semibold text-foreground text-sm leading-snug truncate">
+                              {item.name}
+                            </h4>
+                            <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-gold text-xs shrink-0">
+                                {formatPrice(item.price)}
+                              </span>
+                              <span className="text-muted-foreground text-[10px] shrink-0">•</span>
+                              <span className="inline-flex rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground truncate max-w-[110px]">
+                                {item.category_id
+                                  ? categoryMap.get(item.category_id) || "Category"
+                                  : "Category"}
+                              </span>
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                          </div>
+
+                          {/* Actions: Edit & Delete combined in top row */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setEditingItem(item);
+                                setItemDialogOpen(true);
+                              }}
+                              className="h-8 gap-1 px-2.5 text-xs font-medium"
+                              title="Edit Dish"
+                            >
+                              <Edit2 className="size-3.5" />
+                              <span className="hidden xs:inline">Edit</span>
+                            </Button>
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteItem(item)}
+                              className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                              title="Delete Dish"
+                            >
+                              <Trash2 className="size-3.5" />
+                              <span className="sr-only">Delete</span>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
+
+                {/* DESKTOP VIEW: Full Wide Table */}
+                <div className="hidden md:block overflow-hidden rounded-xl border border-border bg-card shadow-2xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
+                        <tr>
+                          <th
+                            className="w-12 px-3 py-3 text-center font-mono font-bold text-muted-foreground"
+                            title="Reorder Handle"
+                          >
+                            =
+                          </th>
+                          <th className="px-4 py-3 sm:w-16">Image</th>
+                          <th className="px-4 py-3">Dish Name</th>
+                          <th className="px-4 py-3">Category</th>
+                          <th className="px-4 py-3">Price (₹)</th>
+                          <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {filteredItems.map((item, idx) => {
+                          const isDragging = draggingItemIdx === idx;
+                          const isOver = dragOverItemIdx === idx;
+                          const isDropTargetTop =
+                            isOver && draggingItemIdx !== null && draggingItemIdx > idx;
+                          const isDropTargetBottom =
+                            isOver && draggingItemIdx !== null && draggingItemIdx < idx;
+
+                          return (
+                            <tr
+                              key={item.id}
+                              data-index={idx}
+                              data-drag-type="item"
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                if (dragOverItemIdx !== idx) setDragOverItemIdx(idx);
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (draggingItemIdx !== null && draggingItemIdx !== idx) {
+                                  handleReorderItems(draggingItemIdx, idx);
+                                }
+                                setDraggingItemIdx(null);
+                                setDragOverItemIdx(null);
+                              }}
+                              className={`transition-colors ${
+                                isDragging ? "opacity-35 bg-primary/10" : "hover:bg-muted/20"
+                              } ${isDropTargetTop ? "border-t-2 border-gold bg-gold/5" : ""} ${
+                                isDropTargetBottom ? "border-b-2 border-gold bg-gold/5" : ""
+                              }`}
+                            >
+                              {/* Reorder Handle: '=' symbol */}
+                              <td className="w-12 px-3 py-3 text-center align-middle">
+                                <div
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = "move";
+                                    e.dataTransfer.setData("text/plain", String(idx));
+                                    setDraggingItemIdx(idx);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDraggingItemIdx(null);
+                                    setDragOverItemIdx(null);
+                                  }}
+                                  onTouchStart={() => handleTouchStart("item", idx)}
+                                  onTouchMove={(e) => handleTouchMove(e, "item")}
+                                  onTouchEnd={() => handleTouchEnd("item")}
+                                  className="group/grab inline-flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
+                                  title="Hold '=' and drag up or down to reorder"
+                                  aria-label={`Hold and drag to reorder ${item.name}`}
+                                >
+                                  =
+                                </div>
+                              </td>
+
+                              {/* Dish Image */}
+                              <td className="px-4 py-3">
+                                <div className="size-12 overflow-hidden rounded-lg border border-border bg-muted">
+                                  {item.image_url ? (
+                                    <img
+                                      src={item.image_url}
+                                      alt={item.name}
+                                      className="size-full object-cover"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div className="grid size-full place-items-center text-muted-foreground">
+                                      <ImageIcon className="size-5 opacity-40" />
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Name */}
+                              <td className="px-4 py-3 max-w-sm">
+                                <p className="font-semibold text-foreground text-sm">{item.name}</p>
+                              </td>
+
+                              {/* Category Badge */}
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <span className="inline-flex rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+                                  {item.category_id
+                                    ? categoryMap.get(item.category_id) || "Category"
+                                    : "Category"}
+                                </span>
+                              </td>
+
+                              {/* Price */}
+                              <td className="px-4 py-3 font-semibold text-gold text-sm whitespace-nowrap">
+                                {formatPrice(item.price)}
+                              </td>
+
+                              {/* Edit / Delete Buttons */}
+                              <td className="px-4 py-3 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingItem(item);
+                                      setItemDialogOpen(true);
+                                    }}
+                                    className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+                                    title="Edit Dish"
+                                  >
+                                    <Edit2 className="size-3.5" />
+                                    <span className="hidden sm:inline">Edit</span>
+                                  </Button>
+
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteItem(item)}
+                                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    title="Delete Dish"
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -577,78 +919,256 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         {/* TAB 2: CATEGORIES */}
         {activeTab === "categories" && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card shadow-2xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3">Category Name</th>
-                      <th className="px-4 py-3">URL Slug</th>
-                      <th className="px-4 py-3">Display Order</th>
-                      <th className="px-4 py-3">Items Count</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {categories.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                          No categories configured. Click "Add Category" to create one.
-                        </td>
-                      </tr>
-                    ) : (
-                      categories.map((cat) => {
-                        const count = items.filter((i) => i.category_id === cat.id).length;
-                        return (
-                          <tr key={cat.id} className="transition-colors hover:bg-muted/20">
-                            <td className="px-4 py-3 font-semibold text-foreground text-sm">
-                              {cat.name}
-                            </td>
-                            <td className="px-4 py-3 font-mono text-muted-foreground">
-                              {cat.slug}
-                            </td>
-                            <td className="px-4 py-3 font-mono text-muted-foreground">
-                              {cat.sort_order}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Badge variant="secondary" className="text-[11px]">
+            {sortedCategories.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
+                <Layers className="mx-auto size-10 text-muted-foreground/50" />
+                <h3 className="mt-3 font-serif text-lg font-semibold">No categories yet</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Click "Add Category" above to create your first section.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* MOBILE VIEW: Clean Cards with all details visible without swiping */}
+                <div className="space-y-3 md:hidden">
+                  {sortedCategories.map((cat, idx) => {
+                    const count = items.filter((i) => i.category_id === cat.id).length;
+                    const isDragging = draggingCatIdx === idx;
+                    const isOver = dragOverCatIdx === idx;
+                    const isDropTargetTop =
+                      isOver && draggingCatIdx !== null && draggingCatIdx > idx;
+                    const isDropTargetBottom =
+                      isOver && draggingCatIdx !== null && draggingCatIdx < idx;
+
+                    return (
+                      <div
+                        key={cat.id}
+                        data-index={idx}
+                        data-drag-type="category"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (dragOverCatIdx !== idx) setDragOverCatIdx(idx);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (draggingCatIdx !== null && draggingCatIdx !== idx) {
+                            handleReorderCategories(draggingCatIdx, idx);
+                          }
+                          setDraggingCatIdx(null);
+                          setDragOverCatIdx(null);
+                        }}
+                        className={`rounded-xl border border-border bg-card p-3.5 transition-all ${
+                          isDragging ? "opacity-35 ring-2 ring-primary" : "hover:border-gold/40"
+                        } ${isDropTargetTop ? "border-t-2 border-t-gold bg-gold/5" : ""} ${
+                          isDropTargetBottom ? "border-b-2 border-b-gold bg-gold/5" : ""
+                        }`}
+                      >
+                        {/* Single Row: Reorder Handle + Category Details + Edit/Delete Actions */}
+                        <div className="flex items-center gap-2.5 sm:gap-3">
+                          {/* Reorder Handle */}
+                          <div className="flex flex-col items-center gap-1 shrink-0">
+                            <div
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData("text/plain", String(idx));
+                                setDraggingCatIdx(idx);
+                              }}
+                              onDragEnd={() => {
+                                setDraggingCatIdx(null);
+                                setDragOverCatIdx(null);
+                              }}
+                              onTouchStart={() => handleTouchStart("category", idx)}
+                              onTouchMove={(e) => handleTouchMove(e, "category")}
+                              onTouchEnd={() => handleTouchEnd("category")}
+                              className="flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-sm font-bold text-muted-foreground shadow-2xs hover:border-gold hover:text-gold active:bg-gold/10 cursor-grab active:cursor-grabbing select-none"
+                              title="Hold '=' and drag to reorder"
+                              aria-label={`Reorder category ${cat.name}`}
+                            >
+                              =
+                            </div>
+                            <span className="text-[10px] font-mono font-medium text-muted-foreground">
+                              #{cat.sort_order}
+                            </span>
+                          </div>
+
+                          {/* Category Details */}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold text-foreground text-sm truncate">
+                                {cat.name}
+                              </h4>
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px] px-1.5 py-0 shrink-0"
+                              >
                                 {count} {count === 1 ? "item" : "items"}
                               </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setEditingCategory(cat);
-                                    setCategoryDialogOpen(true);
+                            </div>
+                            <p className="mt-0.5 font-mono text-[11px] text-muted-foreground truncate">
+                              /{cat.slug}
+                            </p>
+                          </div>
+
+                          {/* Actions: Edit & Delete combined in top row */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setEditingCategory(cat);
+                                setCategoryDialogOpen(true);
+                              }}
+                              className="h-8 gap-1 px-2.5 text-xs font-medium"
+                              title="Edit Category"
+                            >
+                              <Edit2 className="size-3.5" />
+                              <span className="hidden xs:inline">Edit</span>
+                            </Button>
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteCategory(cat)}
+                              className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                              title="Delete Category"
+                            >
+                              <Trash2 className="size-3.5" />
+                              <span className="sr-only">Delete</span>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* DESKTOP VIEW: Table */}
+                <div className="hidden md:block rounded-xl border border-border bg-card shadow-2xs overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
+                        <tr>
+                          <th
+                            className="w-12 px-3 py-3 text-center font-mono font-bold text-muted-foreground"
+                            title="Reorder Handle"
+                          >
+                            =
+                          </th>
+                          <th className="px-4 py-3">Category Name</th>
+                          <th className="px-4 py-3">URL Slug</th>
+                          <th className="px-4 py-3">Display Order</th>
+                          <th className="px-4 py-3">Items Count</th>
+                          <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {sortedCategories.map((cat, idx) => {
+                          const count = items.filter((i) => i.category_id === cat.id).length;
+                          const isDragging = draggingCatIdx === idx;
+                          const isOver = dragOverCatIdx === idx;
+                          const isDropTargetTop =
+                            isOver && draggingCatIdx !== null && draggingCatIdx > idx;
+                          const isDropTargetBottom =
+                            isOver && draggingCatIdx !== null && draggingCatIdx < idx;
+
+                          return (
+                            <tr
+                              key={cat.id}
+                              data-index={idx}
+                              data-drag-type="category"
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                if (dragOverCatIdx !== idx) setDragOverCatIdx(idx);
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (draggingCatIdx !== null && draggingCatIdx !== idx) {
+                                  handleReorderCategories(draggingCatIdx, idx);
+                                }
+                                setDraggingCatIdx(null);
+                                setDragOverCatIdx(null);
+                              }}
+                              className={`transition-colors ${
+                                isDragging ? "opacity-35 bg-primary/10" : "hover:bg-muted/20"
+                              } ${isDropTargetTop ? "border-t-2 border-gold bg-gold/5" : ""} ${
+                                isDropTargetBottom ? "border-b-2 border-gold bg-gold/5" : ""
+                              }`}
+                            >
+                              {/* Reorder Handle: '=' symbol */}
+                              <td className="w-12 px-3 py-3 text-center align-middle">
+                                <div
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = "move";
+                                    e.dataTransfer.setData("text/plain", String(idx));
+                                    setDraggingCatIdx(idx);
                                   }}
-                                  className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
-                                  title="Edit Category"
+                                  onDragEnd={() => {
+                                    setDraggingCatIdx(null);
+                                    setDragOverCatIdx(null);
+                                  }}
+                                  onTouchStart={() => handleTouchStart("category", idx)}
+                                  onTouchMove={(e) => handleTouchMove(e, "category")}
+                                  onTouchEnd={() => handleTouchEnd("category")}
+                                  className="group/grab inline-flex size-7 items-center justify-center rounded-md border border-border/80 bg-background font-mono text-base font-bold text-muted-foreground shadow-2xs transition-all hover:border-gold/60 hover:bg-gold/10 hover:text-gold hover:scale-105 active:scale-95 cursor-grab active:cursor-grabbing select-none"
+                                  title="Hold '=' and drag up or down to reorder"
+                                  aria-label={`Hold and drag to reorder category ${cat.name}`}
                                 >
-                                  <Edit2 className="size-3.5" />
-                                  <span className="hidden sm:inline">Edit</span>
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDeleteCategory(cat)}
-                                  className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                  title="Delete Category"
-                                >
-                                  <Trash2 className="size-3.5" />
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                                  =
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-foreground text-sm">
+                                {cat.name}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-muted-foreground">
+                                {cat.slug}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-muted-foreground font-semibold">
+                                {cat.sort_order}
+                              </td>
+                              <td className="px-4 py-3">
+                                <Badge variant="secondary" className="text-[11px]">
+                                  {count} {count === 1 ? "item" : "items"}
+                                </Badge>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingCategory(cat);
+                                      setCategoryDialogOpen(true);
+                                    }}
+                                    className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+                                    title="Edit Category"
+                                  >
+                                    <Edit2 className="size-3.5" />
+                                    <span className="hidden sm:inline">Edit</span>
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteCategory(cat)}
+                                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    title="Delete Category"
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 

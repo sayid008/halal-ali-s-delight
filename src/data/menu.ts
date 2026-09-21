@@ -218,4 +218,6 @@ export const restaurant = {
   address: "124 High Street, London E1 6QL",
   phone: "020 7946 0912",
   hours: "Mon–Sun: 12:00 PM – 11:00 PM",
+  mapsUrl:
+    "https://www.google.com/maps/dir/?api=1&destination=Halal+Ali+Dine+Inn+%26+Take+Away%2C+124+High+Street%2C+London+E1+6QL",
 };
