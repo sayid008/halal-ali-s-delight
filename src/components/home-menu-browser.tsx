@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { MenuSection } from "@/data/menu";
 import { MenuItemRow } from "@/components/menu-item-row";
@@ -15,6 +15,9 @@ type Category = {
 export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
   const [selected, setSelected] = useState("all");
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const staticButtonRef = useRef<HTMLAnchorElement>(null);
+  const [showFloating, setShowFloating] = useState(false);
+
   const categories: Category[] = [
     { id: "all", label: "All Items", image: heroBiryani },
     ...sections.map((section) => ({
@@ -25,6 +28,32 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
   ];
   const visibleSections =
     selected === "all" ? sections : sections.filter(({ id }) => id === selected);
+
+  useEffect(() => {
+    const updateFloatingVisibility = () => {
+      if (!staticButtonRef.current) return;
+      const rect = staticButtonRef.current.getBoundingClientRect();
+      const windowHeight = window.innerHeight;
+
+      // Hide the floating button once the static button comes into view or has been scrolled past.
+      // Show it while the user is above the static button in the menu section.
+      if (rect.top <= windowHeight - 30) {
+        setShowFloating(false);
+      } else {
+        setShowFloating(true);
+      }
+    };
+
+    updateFloatingVisibility();
+
+    window.addEventListener("scroll", updateFloatingVisibility, { passive: true });
+    window.addEventListener("resize", updateFloatingVisibility);
+
+    return () => {
+      window.removeEventListener("scroll", updateFloatingVisibility);
+      window.removeEventListener("resize", updateFloatingVisibility);
+    };
+  }, [selected, sections]);
 
   function scrollCategories(direction: -1 | 1) {
     scrollerRef.current?.scrollBy({ left: direction * 280, behavior: "smooth" });
@@ -123,12 +152,34 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
             ))}
 
             <Link
+              ref={staticButtonRef}
+              id="static-view-full-menu-button"
               to="/menu"
-              className="flex w-full items-center justify-center rounded-2xl bg-gold py-4 font-bold text-gold-foreground shadow-lg"
+              className="flex w-full items-center justify-center rounded-2xl bg-gold py-4 font-bold text-gold-foreground shadow-lg transition-transform hover:brightness-105 active:scale-[0.99]"
             >
               View Full Menu
             </Link>
           </div>
+        </div>
+      </div>
+
+      {/* Floating "View Full Menu" button styled exactly like the static one with identical length and alignment */}
+      <div
+        id="floating-view-full-menu-container"
+        className={`fixed bottom-5 left-0 right-0 z-40 px-4 transition-all duration-300 ease-out ${
+          showFloating
+            ? "pointer-events-auto translate-y-0 opacity-100"
+            : "pointer-events-none translate-y-6 opacity-0"
+        }`}
+      >
+        <div className="mx-auto max-w-3xl px-5 sm:px-7">
+          <Link
+            id="floating-view-full-menu-button"
+            to="/menu"
+            className="flex w-full items-center justify-center rounded-2xl bg-gold py-4 font-bold text-gold-foreground shadow-2xl transition-transform hover:brightness-105 active:scale-[0.99]"
+          >
+            View Full Menu
+          </Link>
         </div>
       </div>
     </section>

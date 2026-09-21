@@ -311,6 +311,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     type: "item" | "category";
     fromIndex: number;
     lastOverIndex: number | null;
+    startY: number;
   } | null>(null);
 
   // Handle reordering categories

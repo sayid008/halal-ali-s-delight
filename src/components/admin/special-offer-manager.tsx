@@ -55,14 +55,21 @@ export function SpecialOfferManager() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchSpecialOffer().then((data) => {
-      setOffer(data);
-      setLoading(false);
-    });
+    fetchSpecialOffer()
+      .then((data) => {
+        setOffer(data || DEFAULT_SPECIAL_OFFER);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.warn("Could not fetch remote special offer, using fallback:", err);
+        setOffer(DEFAULT_SPECIAL_OFFER);
+        setLoading(false);
+      });
   }, []);
 
   const slides: SpecialOfferSlide[] = getOfferSlides(offer);
   const currentSlide: SpecialOfferSlide = slides[activeSlideIdx] || slides[0] || DEFAULT_SLIDES[0];
+  const activeSlide: SpecialOfferSlide = currentSlide;
 
   function updateSlide(idx: number, patch: Partial<SpecialOfferSlide>) {
     setOffer((prev) => {
