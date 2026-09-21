@@ -78,8 +78,36 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const [categories, setCategories] = useState<DatabaseCategory[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Active Tab
-  const [activeTab, setActiveTab] = useState<"items" | "categories" | "special_offer">("items");
+  // Active Tab with URL synchronization
+  const [activeTab, setActiveTab] = useState<"items" | "categories" | "special_offer">(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (
+        tabParam === "special_offer" ||
+        tabParam === "special-offer" ||
+        tabParam === "offers" ||
+        tabParam === "offer" ||
+        window.location.hash === "#special_offer" ||
+        window.location.hash === "#special-offer"
+      ) {
+        return "special_offer";
+      }
+      if (tabParam === "categories") {
+        return "categories";
+      }
+    }
+    return "items";
+  });
+
+  function handleSelectTab(tab: "items" | "categories" | "special_offer") {
+    setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tab);
+      window.history.replaceState({}, "", url.toString());
+    }
+  }
 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -456,6 +484,21 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant={activeTab === "special_offer" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleSelectTab("special_offer")}
+              className={`h-8 gap-1.5 text-xs font-semibold transition-all ${
+                activeTab === "special_offer"
+                  ? "bg-gold text-gold-foreground hover:bg-gold/90 shadow-xs"
+                  : "border-gold/40 text-gold hover:bg-gold/10"
+              }`}
+              title="Open Special Offer Manager"
+            >
+              <Tag className="size-3.5" />
+              <span>Special Offer</span>
+            </Button>
+
             <Link
               to="/"
               target="_blank"
@@ -512,43 +555,46 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           </div>
         </div>
 
-        {/* Navigation Tabs & Actions Bar */}
+        {/* Navigation Tabs & Actions Bar: 100% visible on all devices */}
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex w-full items-center gap-1 border-b border-border overflow-x-auto no-scrollbar pb-1 sm:w-auto sm:border-0 sm:pb-0">
+          <div className="grid grid-cols-3 w-full sm:w-auto sm:inline-flex items-center gap-1 rounded-xl bg-muted/70 p-1 border border-border shadow-2xs">
             <button
-              onClick={() => setActiveTab("items")}
-              className={`flex shrink-0 items-center gap-2 border-b-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-colors ${
+              type="button"
+              onClick={() => handleSelectTab("items")}
+              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
                 activeTab === "items"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <UtensilsCrossed className="size-4" />
-              <span>Menu Items ({items.length})</span>
+              <UtensilsCrossed className="size-3.5 sm:size-4 shrink-0" />
+              <span className="truncate">Items ({items.length})</span>
             </button>
 
             <button
-              onClick={() => setActiveTab("categories")}
-              className={`flex shrink-0 items-center gap-2 border-b-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-colors ${
+              type="button"
+              onClick={() => handleSelectTab("categories")}
+              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
                 activeTab === "categories"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Layers className="size-4" />
-              <span>Categories ({categories.length})</span>
+              <Layers className="size-3.5 sm:size-4 shrink-0" />
+              <span className="truncate">Categories ({categories.length})</span>
             </button>
 
             <button
-              onClick={() => setActiveTab("special_offer")}
-              className={`flex shrink-0 items-center gap-2 border-b-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-colors ${
+              type="button"
+              onClick={() => handleSelectTab("special_offer")}
+              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold transition-all ${
                 activeTab === "special_offer"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-gold shadow-xs ring-1 ring-gold/40 font-bold"
+                  : "text-gold hover:text-gold hover:bg-gold/10"
               }`}
             >
-              <Tag className="size-4 text-gold" />
-              <span>Special Offer</span>
+              <Tag className="size-3.5 sm:size-4 shrink-0 text-gold" />
+              <span className="truncate">Special Offer</span>
             </button>
           </div>
 
