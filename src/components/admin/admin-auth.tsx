@@ -91,6 +91,17 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
+          <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+            <p className="font-medium text-primary">Default Admin Credentials:</p>
+            <p className="mt-0.5">
+              Email:{" "}
+              <span className="font-mono font-semibold text-foreground">admin@halal-ali.com</span>
+            </p>
+            <p>
+              Password: <span className="font-mono font-semibold text-foreground">admin123</span>
+            </p>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
