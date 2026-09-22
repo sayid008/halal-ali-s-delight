@@ -344,6 +344,23 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         }
       }
 
+      if (loadedCategories.length === 0) {
+        const cached = getLocalMenuSnapshot();
+        if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+          loadedCategories = cached.categories;
+        } else {
+          loadedCategories = defaultCategories;
+        }
+      }
+      if (loadedItems.length === 0) {
+        const cached = getLocalMenuSnapshot();
+        if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+          loadedItems = cached.items;
+        } else {
+          loadedItems = defaultItems;
+        }
+      }
+
       // Ensure items are distributed across all active database categories (except Shop)
       const nonShopCategories = loadedCategories.filter(
         (c) => !c.deleted_at && c.available !== false && !isShopCategory(c),
