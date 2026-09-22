@@ -105,11 +105,13 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
     sort_order: idx + 1,
   }));
 
-  // 1. Save locally
+  // 1. Save locally in category order key and snapshot cache
   if (isStorageAvailable()) {
     try {
       const orderIdentifiers = updated.map((c) => c.slug || c.id);
       window.localStorage.setItem(CATEGORY_ORDER_KEY, JSON.stringify(orderIdentifiers));
+      const snapshot = getLocalMenuSnapshot();
+      saveLocalMenuSnapshot(updated, snapshot?.items || []);
     } catch (e) {
       console.warn("Failed to write category order to localStorage:", e);
     }
@@ -127,9 +129,27 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
   // 3. Persist to Supabase if configured
   if (isSupabaseConfigured) {
     try {
-      const updates = updated.map((cat) =>
-        supabase.from("categories").update({ sort_order: cat.sort_order }).eq("id", cat.id),
-      );
+      const isUUID = (str?: string | null) =>
+        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
+      const updates = updated.map((cat) => {
+        if (cat.id && isUUID(cat.id)) {
+          return supabase
+            .from("categories")
+            .update({ sort_order: cat.sort_order })
+            .eq("id", cat.id);
+        } else if (cat.slug) {
+          return supabase
+            .from("categories")
+            .update({ sort_order: cat.sort_order })
+            .eq("slug", cat.slug);
+        } else {
+          return supabase
+            .from("categories")
+            .update({ sort_order: cat.sort_order })
+            .eq("name", cat.name);
+        }
+      });
       await Promise.all(updates);
     } catch (err) {
       console.warn("Supabase category sort order update error:", err);
@@ -146,7 +166,7 @@ export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Prom
     sort_order: idx + 1,
   }));
 
-  // 1. Save locally
+  // 1. Save locally in item order map and snapshot cache
   if (isStorageAvailable()) {
     try {
       const orderMap: Record<string, number> = {};
@@ -157,6 +177,8 @@ export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Prom
         }
       });
       window.localStorage.setItem(ITEM_ORDER_KEY, JSON.stringify(orderMap));
+      const snapshot = getLocalMenuSnapshot();
+      saveLocalMenuSnapshot(snapshot?.categories || [], updated);
     } catch (e) {
       console.warn("Failed to write item order to localStorage:", e);
     }
@@ -174,9 +196,22 @@ export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Prom
   // 3. Persist to Supabase if configured
   if (isSupabaseConfigured) {
     try {
-      const updates = updated.map((item) =>
-        supabase.from("menu_items").update({ sort_order: item.sort_order }).eq("id", item.id),
-      );
+      const isUUID = (str?: string | null) =>
+        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
+      const updates = updated.map((item) => {
+        if (item.id && isUUID(item.id)) {
+          return supabase
+            .from("menu_items")
+            .update({ sort_order: item.sort_order })
+            .eq("id", item.id);
+        } else {
+          return supabase
+            .from("menu_items")
+            .update({ sort_order: item.sort_order })
+            .eq("name", item.name);
+        }
+      });
       await Promise.all(updates);
     } catch (err) {
       console.warn("Supabase menu item sort order update error:", err);

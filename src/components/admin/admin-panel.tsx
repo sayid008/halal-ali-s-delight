@@ -480,7 +480,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const trashedItems = useMemo(() => items.filter((i) => !!i.deleted_at), [items]);
   const trashedCategories = useMemo(() => categories.filter((c) => !!c.deleted_at), [categories]);
 
-  // Toggle Dish Visibility (Active 👁️ vs Inactive 👁️‍🗨️)
+  // Toggle Dish Visibility (Active vs Inactive)
   async function handleToggleItemVisibility(item: DatabaseMenuItem) {
     const nextVal = item.available === false ? true : false;
     const updatedItems = items.map((i) => (i.id === item.id ? { ...i, available: nextVal } : i));
@@ -489,8 +489,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
     toast.success(
       nextVal
-        ? `"${item.name}" is now Active 👁️ (Visible on customer menu)`
-        : `"${item.name}" is now Inactive 👁️‍🗨️ (Hidden from customer menu)`,
+        ? `"${item.name}" is now Active (Visible on customer menu)`
+        : `"${item.name}" is now Inactive (Hidden from customer menu)`,
     );
 
     if (isSupabaseConfigured) {
@@ -512,7 +512,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
   }
 
-  // Toggle Category Visibility (Active 👁️ vs Inactive 👁️‍🗨️)
+  // Toggle Category Visibility (Active vs Inactive)
   async function handleToggleCategoryVisibility(cat: DatabaseCategory) {
     const nextVal = cat.available === false ? true : false;
     const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, available: nextVal } : c));
@@ -521,8 +521,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
     toast.success(
       nextVal
-        ? `Category "${cat.name}" is now Active 👁️ (Visible on customer menu)`
-        : `Category "${cat.name}" is now Inactive 👁️‍🗨️ (Hidden from customer menu)`,
+        ? `Category "${cat.name}" is now Active (Visible on customer menu)`
+        : `Category "${cat.name}" is now Inactive (Hidden from customer menu)`,
     );
 
     if (isSupabaseConfigured) {
@@ -1035,6 +1035,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }));
 
     setCategories(reordered);
+    saveLocalMenuSnapshot(reordered, items);
     toast.success(`"${movedCat.name}" moved to position #${toIdx + 1}`);
 
     try {
@@ -1073,6 +1074,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }));
 
     setItems(reordered);
+    saveLocalMenuSnapshot(categories, reordered);
     toast.success(`"${movedItem.name}" moved to position #${toFilteredIdx + 1}`);
 
     try {
@@ -1477,10 +1479,10 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                 >
                   <option value="all">All Visibility ({activeItems.length})</option>
                   <option value="active">
-                    👁️ Active ({activeItems.filter((i) => i.available !== false).length})
+                    Active ({activeItems.filter((i) => i.available !== false).length})
                   </option>
                   <option value="inactive">
-                    👁️‍🗨️ Inactive ({activeItems.filter((i) => i.available === false).length})
+                    Inactive ({activeItems.filter((i) => i.available === false).length})
                   </option>
                 </select>
 
@@ -1630,17 +1632,17 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                   ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"
                                   : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
                               }`}
-                              title={`Click to mark ${item.available !== false ? "Inactive 👁️‍🗨️" : "Active 👁️"}`}
+                              title={`Click to mark ${item.available !== false ? "Inactive" : "Active"}`}
                             >
                               {item.available !== false ? (
                                 <>
                                   <Eye className="size-2.5 text-emerald-500" />
-                                  <span>Active 👁️</span>
+                                  <span>Active</span>
                                 </>
                               ) : (
                                 <>
                                   <EyeOff className="size-2.5 text-muted-foreground" />
-                                  <span>Inactive 👁️‍🗨️</span>
+                                  <span>Inactive</span>
                                 </>
                               )}
                             </button>
@@ -1779,17 +1781,17 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                     ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 shadow-2xs"
                                     : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
                                 }`}
-                                title={`Click to toggle: currently ${item.available !== false ? "Active 👁️" : "Inactive 👁️‍🗨️"}`}
+                                title={`Click to toggle: currently ${item.available !== false ? "Active" : "Inactive"}`}
                               >
                                 {item.available !== false ? (
                                   <>
                                     <Eye className="size-3 text-emerald-500" />
-                                    <span>Active 👁️</span>
+                                    <span>Active</span>
                                   </>
                                 ) : (
                                   <>
                                     <EyeOff className="size-3 text-muted-foreground" />
-                                    <span>Inactive 👁️‍🗨️</span>
+                                    <span>Inactive</span>
                                   </>
                                 )}
                               </button>
@@ -1933,17 +1935,17 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                     ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"
                                     : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
                                 }`}
-                                title={`Click to mark ${cat.available !== false ? "Inactive 👁️‍🗨️" : "Active 👁️"}`}
+                                title={`Click to mark ${cat.available !== false ? "Inactive" : "Active"}`}
                               >
                                 {cat.available !== false ? (
                                   <>
                                     <Eye className="size-2.5 text-emerald-500" />
-                                    <span>Active 👁️</span>
+                                    <span>Active</span>
                                   </>
                                 ) : (
                                   <>
                                     <EyeOff className="size-2.5 text-muted-foreground" />
-                                    <span>Inactive 👁️‍🗨️</span>
+                                    <span>Inactive</span>
                                   </>
                                 )}
                               </button>
@@ -2075,17 +2077,17 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 shadow-2xs"
                                       : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
                                   }`}
-                                  title={`Click to toggle: currently ${cat.available !== false ? "Active 👁️" : "Inactive 👁️‍🗨️"}`}
+                                  title={`Click to toggle: currently ${cat.available !== false ? "Active" : "Inactive"}`}
                                 >
                                   {cat.available !== false ? (
                                     <>
                                       <Eye className="size-3 text-emerald-500" />
-                                      <span>Active 👁️</span>
+                                      <span>Active</span>
                                     </>
                                   ) : (
                                     <>
                                       <EyeOff className="size-3 text-muted-foreground" />
-                                      <span>Inactive 👁️‍🗨️</span>
+                                      <span>Inactive</span>
                                     </>
                                   )}
                                 </button>

@@ -159,8 +159,8 @@ export function CategoryDialog({ open, onOpenChange, category, onSave }: Categor
                 </Label>
                 <p className="text-[11px] text-muted-foreground">
                   {available
-                    ? "Active 👁️ (Visible on customer menu)"
-                    : "Inactive 👁️‍🗨️ (Hidden from customer menu, safely kept in admin)"}
+                    ? "Active (Visible on customer menu)"
+                    : "Inactive (Hidden from customer menu, safely kept in admin)"}
                 </p>
               </div>
 
