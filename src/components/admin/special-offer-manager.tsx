@@ -48,51 +48,59 @@ const PRESET_IMAGES = [
 ];
 
 export function SpecialOfferManager() {
-  const [offer, setOffer] = useState<SpecialOffer>(DEFAULT_SPECIAL_OFFER);
+  const [offer, setOffer] = useState<SpecialOffer>(getLocalSpecialOffer);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const current = getLocalSpecialOffer();
+    setOffer(current);
+
     fetchSpecialOffer()
       .then((data) => {
-        setOffer(data || DEFAULT_SPECIAL_OFFER);
-        setLoading(false);
+        if (data) {
+          setOffer(data);
+        }
       })
       .catch((err) => {
         console.warn("Could not fetch remote special offer, using fallback:", err);
-        setOffer(DEFAULT_SPECIAL_OFFER);
-        setLoading(false);
       });
   }, []);
+
+  function applyAndSaveOffer(updated: SpecialOffer) {
+    setOffer(updated);
+    saveSpecialOffer(updated).catch((err) => {
+      console.warn("Failed to auto-save special offer:", err);
+    });
+  }
 
   const slides: SpecialOfferSlide[] = getOfferSlides(offer);
   const currentSlide: SpecialOfferSlide = slides[activeSlideIdx] || slides[0] || DEFAULT_SLIDES[0];
   const activeSlide: SpecialOfferSlide = currentSlide;
 
   function updateSlide(idx: number, patch: Partial<SpecialOfferSlide>) {
-    setOffer((prev) => {
-      const currentSlides = getOfferSlides(prev);
-      const updatedSlides = currentSlides.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+    const currentSlides = getOfferSlides(offer);
+    const updatedSlides = currentSlides.map((s, i) => (i === idx ? { ...s, ...patch } : s));
 
-      return {
-        ...prev,
-        slides: updatedSlides,
-        // Keep top-level in sync with first slide for backward compatibility
-        ...(idx === 0
-          ? {
-              badge: patch.badge ?? prev.badge,
-              title: patch.title ?? prev.title,
-              description: patch.description ?? prev.description,
-              price: patch.price ?? prev.price,
-              original_price: patch.original_price ?? prev.original_price,
-              image_url: patch.image_url ?? prev.image_url,
-            }
-          : {}),
-      };
-    });
+    const updatedOffer: SpecialOffer = {
+      ...offer,
+      slides: updatedSlides,
+      ...(idx === 0
+        ? {
+            badge: patch.badge ?? offer.badge,
+            title: patch.title ?? offer.title,
+            description: patch.description ?? offer.description,
+            price: patch.price ?? offer.price,
+            original_price: patch.original_price ?? offer.original_price,
+            image_url: patch.image_url ?? offer.image_url,
+          }
+        : {}),
+    };
+
+    applyAndSaveOffer(updatedOffer);
   }
 
   function handleAddSlide() {
@@ -113,11 +121,13 @@ export function SpecialOfferManager() {
       image_url: PRESET_IMAGES[presetIdx].src,
     };
 
-    setOffer((prev) => {
-      const updatedSlides = [...getOfferSlides(prev), newSlide];
-      return { ...prev, slides: updatedSlides };
-    });
+    const updatedSlides = [...getOfferSlides(offer), newSlide];
+    const updatedOffer: SpecialOffer = {
+      ...offer,
+      slides: updatedSlides,
+    };
 
+    applyAndSaveOffer(updatedOffer);
     setActiveSlideIdx(slides.length);
     toast.success(`Special Offer Slide #${slides.length + 1} added!`);
   }
@@ -128,23 +138,23 @@ export function SpecialOfferManager() {
       return;
     }
 
-    setOffer((prev) => {
-      const updated = getOfferSlides(prev).filter((_, i) => i !== idxToDelete);
-      return {
-        ...prev,
-        slides: updated,
-        ...(idxToDelete === 0 && updated[0]
-          ? {
-              badge: updated[0].badge,
-              title: updated[0].title,
-              description: updated[0].description,
-              price: updated[0].price,
-              original_price: updated[0].original_price,
-              image_url: updated[0].image_url,
-            }
-          : {}),
-      };
-    });
+    const updated = getOfferSlides(offer).filter((_, i) => i !== idxToDelete);
+    const updatedOffer: SpecialOffer = {
+      ...offer,
+      slides: updated,
+      ...(idxToDelete === 0 && updated[0]
+        ? {
+            badge: updated[0].badge,
+            title: updated[0].title,
+            description: updated[0].description,
+            price: updated[0].price,
+            original_price: updated[0].original_price,
+            image_url: updated[0].image_url,
+          }
+        : {}),
+    };
+
+    applyAndSaveOffer(updatedOffer);
 
     if (activeSlideIdx >= idxToDelete && activeSlideIdx > 0) {
       setActiveSlideIdx(activeSlideIdx - 1);
@@ -156,24 +166,23 @@ export function SpecialOfferManager() {
     const toIdx = direction === "left" ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= slides.length) return;
 
-    setOffer((prev) => {
-      const arr = [...getOfferSlides(prev)];
-      const temp = arr[fromIdx];
-      arr[fromIdx] = arr[toIdx];
-      arr[toIdx] = temp;
+    const arr = [...getOfferSlides(offer)];
+    const temp = arr[fromIdx];
+    arr[fromIdx] = arr[toIdx];
+    arr[toIdx] = temp;
 
-      return {
-        ...prev,
-        slides: arr,
-        badge: arr[0].badge,
-        title: arr[0].title,
-        description: arr[0].description,
-        price: arr[0].price,
-        original_price: arr[0].original_price,
-        image_url: arr[0].image_url,
-      };
-    });
+    const updatedOffer: SpecialOffer = {
+      ...offer,
+      slides: arr,
+      badge: arr[0].badge,
+      title: arr[0].title,
+      description: arr[0].description,
+      price: arr[0].price,
+      original_price: arr[0].original_price,
+      image_url: arr[0].image_url,
+    };
 
+    applyAndSaveOffer(updatedOffer);
     setActiveSlideIdx(toIdx);
   }
 
@@ -224,9 +233,9 @@ export function SpecialOfferManager() {
   }
 
   function handleResetDefault() {
-    setOffer(DEFAULT_SPECIAL_OFFER);
+    applyAndSaveOffer(DEFAULT_SPECIAL_OFFER);
     setActiveSlideIdx(0);
-    toast.info("Reset to default special offers. Click 'Save Changes' to apply.");
+    toast.info("Reset to default special offers and saved!");
   }
 
   if (loading) {
@@ -256,7 +265,7 @@ export function SpecialOfferManager() {
           <Button
             variant={offer.available ? "outline" : "default"}
             size="sm"
-            onClick={() => setOffer((prev) => ({ ...prev, available: !prev.available }))}
+            onClick={() => applyAndSaveOffer({ ...offer, available: !offer.available })}
             className="h-8 sm:h-9 gap-1 text-xs flex-1 sm:flex-none justify-center"
           >
             {offer.available ? (
@@ -621,7 +630,7 @@ export function SpecialOfferManager() {
               <input
                 type="checkbox"
                 checked={offer.available}
-                onChange={(e) => setOffer((prev) => ({ ...prev, available: e.target.checked }))}
+                onChange={(e) => applyAndSaveOffer({ ...offer, available: e.target.checked })}
                 className="mt-0.5 size-4 rounded border-gray-300 text-gold focus:ring-gold"
               />
               <div>
@@ -639,7 +648,7 @@ export function SpecialOfferManager() {
               <input
                 type="checkbox"
                 checked={offer.autoplay ?? true}
-                onChange={(e) => setOffer((prev) => ({ ...prev, autoplay: e.target.checked }))}
+                onChange={(e) => applyAndSaveOffer({ ...offer, autoplay: e.target.checked })}
                 className="mt-0.5 size-4 rounded border-gray-300 text-gold focus:ring-gold"
               />
               <div>
@@ -657,7 +666,7 @@ export function SpecialOfferManager() {
               <input
                 type="checkbox"
                 checked={offer.show_overlay}
-                onChange={(e) => setOffer((prev) => ({ ...prev, show_overlay: e.target.checked }))}
+                onChange={(e) => applyAndSaveOffer({ ...offer, show_overlay: e.target.checked })}
                 className="mt-0.5 size-4 rounded border-gray-300 text-gold focus:ring-gold"
               />
               <div>

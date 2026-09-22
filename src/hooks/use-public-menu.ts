@@ -32,6 +32,7 @@ function buildSectionsFromData(
         const matches =
           item.category_id === cat.id ||
           item.category_id === cat.slug ||
+          (cat.slug && item.category_id === `cat-${cat.slug}`) ||
           (cat.slug && item.category_id?.includes(cat.slug)) ||
           (cat.name && item.category_id?.toLowerCase() === cat.name.toLowerCase());
         if (matches) {
@@ -57,51 +58,34 @@ function buildSectionsFromData(
     };
   });
 
-  // Check for any leftover active items that weren't assigned to any category
-  const unmatchedItems = items.filter((item) => !matchedItemIds.has(item.id));
-  if (unmatchedItems.length > 0) {
-    if (grouped.length > 0) {
-      // Put in first category
-      unmatchedItems.forEach((item) => {
-        grouped[0].items.push({
-          id: item.id,
-          name: item.name,
-          description: item.description ?? "",
-          price: Number(item.price),
-          image_url: item.image_url,
-          available: item.available !== false,
-          sort_order: item.sort_order ?? 0,
-        });
+  // Only assign unmatched items if they have NO category assigned
+  const unmatchedItems = items.filter((item) => !matchedItemIds.has(item.id) && !item.category_id);
+  if (unmatchedItems.length > 0 && grouped.length > 0) {
+    unmatchedItems.forEach((item) => {
+      grouped[0].items.push({
+        id: item.id,
+        name: item.name,
+        description: item.description ?? "",
+        price: Number(item.price),
+        image_url: item.image_url,
+        available: item.available !== false,
+        sort_order: item.sort_order ?? 0,
       });
-    } else {
-      // Create a default section
-      grouped.push({
-        id: "menu-items",
-        title: "Our Specialities",
-        items: unmatchedItems.map((item) => ({
-          id: item.id,
-          name: item.name,
-          description: item.description ?? "",
-          price: Number(item.price),
-          image_url: item.image_url,
-          available: item.available !== false,
-          sort_order: item.sort_order ?? 0,
-        })),
-      });
-    }
+    });
   }
 
-  // Filter out sections that have 0 items
-  return grouped.filter((sec) => sec.items.length > 0);
+  // Return all active categories so empty categories are visible on the home page and in the category bar
+  return grouped;
 }
 
 function getInitialSections(): MenuSectionWithItems[] {
   const localSnapshot = getLocalMenuSnapshot();
-  if (localSnapshot && localSnapshot.categories.length > 0 && localSnapshot.items.length > 0) {
-    const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items);
-    if (grouped.length > 0) {
-      return grouped;
-    }
+  if (
+    localSnapshot &&
+    Array.isArray(localSnapshot.categories) &&
+    localSnapshot.categories.length > 0
+  ) {
+    return buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
   }
 
   const orderedStatic = applyOrderToStaticSections(staticSections);
@@ -137,7 +121,7 @@ export function usePublicMenu() {
         const dbCategories = (catRes.data as DatabaseCategory[]) || [];
         const dbItems = (itemRes.data as DatabaseMenuItem[]) || [];
 
-        if (dbCategories.length > 0 && dbItems.length > 0) {
+        if (dbCategories.length > 0) {
           const grouped = buildSectionsFromData(dbCategories, dbItems);
           setSections(grouped);
           setLoading(false);
@@ -150,13 +134,15 @@ export function usePublicMenu() {
 
     // 2. Fallback to Local Storage Admin snapshot if available
     const localSnapshot = getLocalMenuSnapshot();
-    if (localSnapshot && localSnapshot.categories.length > 0 && localSnapshot.items.length > 0) {
-      const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items);
-      if (grouped.length > 0) {
-        setSections(grouped);
-        setLoading(false);
-        return;
-      }
+    if (
+      localSnapshot &&
+      Array.isArray(localSnapshot.categories) &&
+      localSnapshot.categories.length > 0
+    ) {
+      const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
+      setSections(grouped);
+      setLoading(false);
+      return;
     }
 
     // 3. Final fallback to ordered static sections

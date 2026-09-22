@@ -140,16 +140,28 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
           <div className="h-px w-full bg-border" />
 
           <div aria-live="polite" className="space-y-8 px-5 py-6 sm:px-7">
-            {visibleSections.map((section) => (
-              <div key={section.id} className="space-y-5">
-                <h3 className="font-serif text-2xl">{section.title}</h3>
-                <div className="grid gap-6 md:grid-cols-2 md:gap-x-10">
-                  {section.items.map((item) => (
-                    <MenuItemRow key={item.name} item={item} />
-                  ))}
+            {visibleSections.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+                No menu categories found.
+              </p>
+            ) : (
+              visibleSections.map((section) => (
+                <div key={section.id} className="space-y-5">
+                  <h3 className="font-serif text-2xl">{section.title}</h3>
+                  {section.items.length > 0 ? (
+                    <div className="grid gap-6 md:grid-cols-2 md:gap-x-10">
+                      {section.items.map((item) => (
+                        <MenuItemRow key={item.name} item={item} />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-xl border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
+                      No dishes added to this section yet.
+                    </p>
+                  )}
                 </div>
-              </div>
-            ))}
+              ))
+            )}
 
             <Link
               ref={staticButtonRef}

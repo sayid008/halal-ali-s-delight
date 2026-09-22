@@ -230,9 +230,13 @@ function MenuPage() {
                 </span>
               </div>
               <div className="space-y-6">
-                {section.items.map((item) => (
-                  <MenuItemRow key={item.name} item={item} />
-                ))}
+                {section.items.length > 0 ? (
+                  section.items.map((item) => <MenuItemRow key={item.name} item={item} />)
+                ) : (
+                  <p className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+                    No dishes added to this section yet.
+                  </p>
+                )}
               </div>
             </section>
           ))}

@@ -81,9 +81,21 @@ const defaultItems: DatabaseMenuItem[] = homeSections.flatMap((sec, sIdx) => {
 });
 
 export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
-  const [items, setItems] = useState<DatabaseMenuItem[]>([]);
-  const [categories, setCategories] = useState<DatabaseCategory[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<DatabaseMenuItem[]>(() => {
+    const cached = getLocalMenuSnapshot();
+    if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+      return cached.items;
+    }
+    return defaultItems;
+  });
+  const [categories, setCategories] = useState<DatabaseCategory[]>(() => {
+    const cached = getLocalMenuSnapshot();
+    if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+      return cached.categories;
+    }
+    return defaultCategories;
+  });
+  const [loading, setLoading] = useState(false);
 
   // Active Tab with URL synchronization
   const [activeTab, setActiveTab] = useState<"items" | "categories" | "special_offer" | "trash">(
@@ -261,9 +273,15 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           if (loadedItems.length === 0) loadedItems = defaultItems;
         }
       } else if (catRes.error || itemRes.error) {
-        // Fallback only if database connection failed
-        if (loadedCategories.length === 0) loadedCategories = defaultCategories;
-        if (loadedItems.length === 0) loadedItems = defaultItems;
+        // Fallback to local snapshot first if database tables are not available
+        const cached = getLocalMenuSnapshot();
+        if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+          loadedCategories = cached.categories;
+          loadedItems = cached.items || [];
+        } else {
+          if (loadedCategories.length === 0) loadedCategories = defaultCategories;
+          if (loadedItems.length === 0) loadedItems = defaultItems;
+        }
       }
 
       setCategories(loadedCategories);
@@ -272,9 +290,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       setHasInitialLoaded(true);
     } catch (err: unknown) {
       console.error("Error loading admin data:", err);
-      setCategories(defaultCategories);
-      setItems(defaultItems);
-      saveLocalMenuSnapshot(defaultCategories, defaultItems);
+      const cached = getLocalMenuSnapshot();
+      if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+        setCategories(cached.categories);
+        setItems(cached.items || []);
+        saveLocalMenuSnapshot(cached.categories, cached.items || []);
+      } else {
+        setCategories(defaultCategories);
+        setItems(defaultItems);
+        saveLocalMenuSnapshot(defaultCategories, defaultItems);
+      }
       setHasInitialLoaded(true);
     } finally {
       setLoading(false);
@@ -390,7 +415,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Move Category to Trash (Soft Delete category and attached dishes)
   async function handleTrashCategory(cat: DatabaseCategory) {
-    const associatedItems = activeItems.filter((i) => i.category_id === cat.id);
+    const isMatchingItem = (i: DatabaseMenuItem) =>
+      i.category_id === cat.id ||
+      i.category_id === cat.slug ||
+      i.category_id === `cat-${cat.slug}` ||
+      Boolean(cat.slug && i.category_id?.includes(cat.slug)) ||
+      Boolean(cat.name && i.category_id?.toLowerCase() === cat.name.toLowerCase());
+
+    const associatedItems = activeItems.filter(isMatchingItem);
     const confirmMessage =
       associatedItems.length > 0
         ? `Move category "${cat.name}" and its ${associatedItems.length} dishes to Trash? They will be hidden from visitors and kept in Trash for 30 days.`
@@ -401,7 +433,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const now = new Date().toISOString();
     const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, deleted_at: now } : c));
     const updatedItems = items.map((i) =>
-      i.category_id === cat.id ? { ...i, deleted_at: now, available: false } : i,
+      isMatchingItem(i) ? { ...i, deleted_at: now, available: false } : i,
     );
     setCategories(updatedCats);
     setItems(updatedItems);
@@ -466,9 +498,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Restore Category from Trash
   async function handleRestoreCategory(cat: DatabaseCategory) {
+    const isMatchingItem = (i: DatabaseMenuItem) =>
+      i.category_id === cat.id ||
+      i.category_id === cat.slug ||
+      i.category_id === `cat-${cat.slug}` ||
+      Boolean(cat.slug && i.category_id?.includes(cat.slug)) ||
+      Boolean(cat.name && i.category_id?.toLowerCase() === cat.name.toLowerCase());
+
     const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, deleted_at: null } : c));
     const updatedItems = items.map((i) =>
-      i.category_id === cat.id ? { ...i, deleted_at: null, available: true } : i,
+      isMatchingItem(i) ? { ...i, deleted_at: null, available: true } : i,
     );
     setCategories(updatedCats);
     setItems(updatedItems);
@@ -520,10 +559,15 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Permanently Delete Category
   async function handlePermanentDeleteCategory(cat: DatabaseCategory) {
+    const isMatchingItem = (i: DatabaseMenuItem) =>
+      i.category_id === cat.id ||
+      i.category_id === cat.slug ||
+      i.category_id === `cat-${cat.slug}` ||
+      Boolean(cat.slug && i.category_id?.includes(cat.slug)) ||
+      Boolean(cat.name && i.category_id?.toLowerCase() === cat.name.toLowerCase());
+
     const updatedCats = categories.filter((c) => c.id !== cat.id);
-    const updatedItems = items.map((i) =>
-      i.category_id === cat.id ? { ...i, category_id: null } : i,
-    );
+    const updatedItems = items.map((i) => (isMatchingItem(i) ? { ...i, category_id: null } : i));
     setCategories(updatedCats);
     setItems(updatedItems);
     saveLocalMenuSnapshot(updatedCats, updatedItems);
@@ -674,14 +718,29 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     };
 
     let newCats: DatabaseCategory[];
+    let newItems = items;
     if (isEditing) {
+      const oldCat = categories.find((c) => c.id === data.id);
       newCats = categories.map((c) => (c.id === data.id ? { ...c, ...updatedCat } : c));
+      if (oldCat && (oldCat.slug !== data.slug || oldCat.id !== catId)) {
+        newItems = items.map((i) => {
+          if (
+            i.category_id === oldCat.id ||
+            i.category_id === oldCat.slug ||
+            i.category_id === `cat-${oldCat.slug}`
+          ) {
+            return { ...i, category_id: catId };
+          }
+          return i;
+        });
+        setItems(newItems);
+      }
     } else {
       newCats = [...categories, updatedCat];
     }
 
     setCategories(newCats);
-    saveLocalMenuSnapshot(newCats, items);
+    saveLocalMenuSnapshot(newCats, newItems);
 
     toast.success(
       isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
