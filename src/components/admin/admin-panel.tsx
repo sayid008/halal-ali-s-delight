@@ -837,8 +837,24 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           sort_order: data.sort_order,
         };
 
-        if (isEditing && data.id && isUUIDFormat(data.id)) {
-          await supabase.from("menu_items").update(dbPayload).eq("id", data.id);
+        if (isEditing) {
+          let updatedInDb = false;
+          if (data.id && isUUIDFormat(data.id)) {
+            const { error: err } = await supabase
+              .from("menu_items")
+              .update(dbPayload)
+              .eq("id", data.id);
+            if (!err) updatedInDb = true;
+          }
+          if (!updatedInDb) {
+            const { error: errByName } = await supabase
+              .from("menu_items")
+              .update(dbPayload)
+              .eq("name", data.name);
+            if (errByName) {
+              await supabase.from("menu_items").upsert(dbPayload, { onConflict: "name" });
+            }
+          }
         } else {
           const { data: inserted } = await supabase
             .from("menu_items")
@@ -925,8 +941,24 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           available: data.available,
         };
 
-        if (isEditing && data.id && isUUIDFormat(data.id)) {
-          await supabase.from("categories").update(dbPayload).eq("id", data.id);
+        if (isEditing) {
+          let updatedInDb = false;
+          if (data.id && isUUIDFormat(data.id)) {
+            const { error: err } = await supabase
+              .from("categories")
+              .update(dbPayload)
+              .eq("id", data.id);
+            if (!err) updatedInDb = true;
+          }
+          if (!updatedInDb) {
+            const { error: errBySlug } = await supabase
+              .from("categories")
+              .update(dbPayload)
+              .eq("slug", data.slug);
+            if (errBySlug) {
+              await supabase.from("categories").upsert(dbPayload, { onConflict: "slug" });
+            }
+          }
         } else {
           const { data: inserted } = await supabase
             .from("categories")

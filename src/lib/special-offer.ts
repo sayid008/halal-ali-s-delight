@@ -163,6 +163,17 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
         autoplay: data.autoplay !== undefined ? data.autoplay : (local.autoplay ?? true),
         updated_at: data.updated_at,
       };
+
+      // If local storage has a newer update timestamp, prefer local
+      if (local.updated_at && remoteOffer.updated_at) {
+        const localTime = new Date(local.updated_at).getTime();
+        const remoteTime = new Date(remoteOffer.updated_at).getTime();
+        if (localTime > remoteTime) {
+          return local;
+        }
+      } else if (local.updated_at && !remoteOffer.updated_at) {
+        return local;
+      }
       // Cache locally
       if (isStorageAvailable()) {
         try {
