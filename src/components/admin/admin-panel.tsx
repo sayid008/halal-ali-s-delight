@@ -5,7 +5,6 @@ import {
   formatPrice,
   isSupabaseConfigured,
   isShopCategory,
-  distributeItemsAcrossCategories,
   type DatabaseMenuItem,
   type DatabaseCategory,
   type AdminUserSession,
@@ -154,8 +153,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [visibilityFilter, setVisibilityFilter] = useState<"all" | "active" | "inactive">("all");
 
   // Dialog States
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
@@ -358,86 +355,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           loadedItems = cached.items;
         } else {
           loadedItems = defaultItems;
-        }
-      }
-
-      // Ensure items are distributed across all active database categories (except Shop)
-      const nonShopCategories = loadedCategories.filter(
-        (c) => !c.deleted_at && c.available !== false && !isShopCategory(c),
-      );
-
-      // If categories exist in database but items table is empty, seed items distributed across non-shop categories
-      if (
-        !hasInitialLoaded &&
-        nonShopCategories.length > 0 &&
-        loadedItems.length === 0 &&
-        !itemRes.error
-      ) {
-        try {
-          const sortedNonShop = [...nonShopCategories].sort(
-            (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
-          );
-          const dishSeeds = defaultItems.map((dish, dIdx) => {
-            const targetCat = sortedNonShop[dIdx % sortedNonShop.length];
-            return {
-              name: dish.name,
-              description: dish.description,
-              price: dish.price,
-              category_id: targetCat && isUUIDFormat(targetCat.id) ? targetCat.id : null,
-              image_url: dish.image_url,
-              available: true,
-              sort_order: Math.floor(dIdx / sortedNonShop.length) * 10 + 10,
-            };
-          });
-
-          const { data: inserted } = await supabase.from("menu_items").insert(dishSeeds).select();
-          if (inserted && inserted.length > 0) {
-            loadedItems = inserted as DatabaseMenuItem[];
-          }
-        } catch (e) {
-          console.warn("Could not seed items to empty database:", e);
-        }
-      }
-
-      // If items exist, check if items are properly distributed across all categories (except shop)
-      if (nonShopCategories.length > 1 && loadedItems.length > 1) {
-        const sortedNonShop = [...nonShopCategories].sort(
-          (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
-        );
-        const validCatIds = new Set(sortedNonShop.map((c) => c.id));
-        const activeDishes = loadedItems.filter((i) => !i.deleted_at);
-
-        const properlyAssignedDishes = activeDishes.filter(
-          (i) => i.category_id && validCatIds.has(i.category_id),
-        );
-        const categoriesWithItems = new Set(properlyAssignedDishes.map((i) => i.category_id));
-
-        // If more than 35% of dishes are unassigned or all dishes are in 1 category:
-        if (
-          properlyAssignedDishes.length < activeDishes.length * 0.65 ||
-          categoriesWithItems.size <= 1
-        ) {
-          const { updatedItems } = distributeItemsAcrossCategories(loadedCategories, loadedItems);
-          loadedItems = updatedItems;
-
-          if (isSupabaseConfigured) {
-            for (const item of updatedItems.filter((i) => !i.deleted_at)) {
-              if (item.id && isUUIDFormat(item.id)) {
-                const payload: { sort_order: number; category_id?: string | null } = {
-                  sort_order: item.sort_order,
-                };
-                if (!isCatTableMissing) {
-                  payload.category_id = isUUIDFormat(item.category_id) ? item.category_id : null;
-                }
-                supabase
-                  .from("menu_items")
-                  .update(payload)
-                  .eq("id", item.id)
-                  .then(() => {})
-                  .catch((e) => console.warn("Auto-sync item distribution error:", e));
-              }
-            }
-          }
         }
       }
 
@@ -980,32 +897,15 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   // Filtered menu items, ordered by sort_order
   const filteredItems = useMemo(() => {
     const list = activeItems.filter((item) => {
-      const matchesSearch =
+      return (
         !searchQuery ||
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      let matchesCategory = true;
-      if (selectedCategory === "all") {
-        matchesCategory = true;
-      } else if (selectedCategory === "uncategorized") {
-        matchesCategory = !item.category_id;
-      } else {
-        matchesCategory = item.category_id === selectedCategory;
-      }
-
-      let matchesVisibility = true;
-      if (visibilityFilter === "active") {
-        matchesVisibility = item.available !== false;
-      } else if (visibilityFilter === "inactive") {
-        matchesVisibility = item.available === false;
-      }
-
-      return matchesSearch && matchesCategory && matchesVisibility;
+        (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      );
     });
 
     return list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  }, [activeItems, searchQuery, selectedCategory, visibilityFilter]);
+  }, [activeItems, searchQuery]);
 
   // Categories sorted by sort_order
   const sortedCategories = useMemo(() => {
@@ -1095,83 +995,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const targetIdx = idx + direction;
     if (targetIdx < 0 || targetIdx >= sortedCategories.length) return;
     handleReorderCategories(idx, targetIdx);
-  }
-
-  // Distribute all active dishes evenly across all active categories, strictly excluding Shop
-  async function handleDistributeAcrossCategories() {
-    const eligibleCategories = categories.filter(
-      (c) => !c.deleted_at && c.available !== false && !isShopCategory(c),
-    );
-
-    if (eligibleCategories.length === 0) {
-      toast.error(
-        "No eligible food categories found (Shop is excluded). Please add categories first.",
-      );
-      return;
-    }
-
-    const activeDishList = items.filter((i) => !i.deleted_at);
-    if (activeDishList.length === 0) {
-      toast.error("No active menu dishes found to distribute.");
-      return;
-    }
-
-    setDistributing(true);
-    try {
-      const { updatedItems, distributedCount, categoriesUsed } = distributeItemsAcrossCategories(
-        categories,
-        items,
-      );
-
-      setItems(updatedItems);
-      saveLocalMenuSnapshot(categories, updatedItems);
-
-      // Sync updated items to Supabase in background
-      if (isSupabaseConfigured) {
-        for (const item of updatedItems.filter((i) => !i.deleted_at)) {
-          try {
-            let catIdToSave = item.category_id;
-            if (catIdToSave && !isUUIDFormat(catIdToSave)) {
-              const matched = categories.find(
-                (c) =>
-                  c.id === catIdToSave ||
-                  c.slug === catIdToSave ||
-                  c.name.toLowerCase() === catIdToSave?.toLowerCase(),
-              );
-              if (matched && isUUIDFormat(matched.id)) {
-                catIdToSave = matched.id;
-              }
-            }
-
-            const dbPayload = {
-              category_id: catIdToSave && isUUIDFormat(catIdToSave) ? catIdToSave : null,
-              sort_order: item.sort_order,
-            };
-
-            if (item.id && isUUIDFormat(item.id)) {
-              await supabase.from("menu_items").update(dbPayload).eq("id", item.id);
-            } else {
-              await supabase.from("menu_items").update(dbPayload).eq("name", item.name);
-            }
-          } catch (syncErr) {
-            console.warn("Item distribution sync error:", syncErr);
-          }
-        }
-      }
-
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event(MENU_ORDER_EVENT));
-      }
-
-      toast.success(
-        `Successfully distributed ${distributedCount} dishes across ${categoriesUsed} categories (Shop excluded) and saved to database!`,
-      );
-    } catch (err) {
-      console.error("Distribution error:", err);
-      toast.error("Failed to distribute dishes across categories.");
-    } finally {
-      setDistributing(false);
-    }
   }
 
   return (
@@ -1435,7 +1258,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         {/* TAB 1: MENU ITEMS */}
         {activeTab === "items" && (
           <div className="space-y-4">
-            {/* Search & Filter Bar */}
+            {/* Search Bar */}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1445,48 +1268,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-8 pl-8 text-xs border-border/70"
                 />
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Visibility Filter */}
-                <select
-                  value={visibilityFilter}
-                  onChange={(e) =>
-                    setVisibilityFilter(e.target.value as "all" | "active" | "inactive")
-                  }
-                  className="h-8 rounded-lg border border-border/70 bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="all">All Visibility ({activeItems.length})</option>
-                  <option value="active">
-                    Active ({activeItems.filter((i) => i.available !== false).length})
-                  </option>
-                  <option value="inactive">
-                    Inactive ({activeItems.filter((i) => i.available === false).length})
-                  </option>
-                </select>
-
-                {/* Category Filter */}
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="h-8 rounded-lg border border-border/70 bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full sm:w-auto"
-                >
-                  <option value="all">All Categories ({activeItems.length})</option>
-                  {sortedCategories.map((cat) => {
-                    const count = activeItems.filter((i) => i.category_id === cat.id).length;
-                    const isShop = isShopCategory(cat);
-                    return (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name} ({count}){isShop ? " — Shop (Excluded)" : ""}
-                      </option>
-                    );
-                  })}
-                  {activeItems.some((i) => !i.category_id) && (
-                    <option value="uncategorized">
-                      Uncategorized ({activeItems.filter((i) => !i.category_id).length})
-                    </option>
-                  )}
-                </select>
               </div>
             </div>
 

@@ -74,62 +74,23 @@ function buildSectionsFromData(
   // Step 2: Unmatched items (null category_id, broken UUID, or unrecognized category)
   const unmatchedItems = items.filter((item) => !matchedItemIds.has(item.id));
 
-  // Check how many non-shop categories currently have dishes
-  const populatedEligibleSections = distributionTargets.filter((cat) => {
-    const sec = sectionMap.get(cat.id);
-    return sec && sec.items.length > 0;
-  });
-
-  // Distribute unmatched items across all eligible (non-shop) categories
-  if (unmatchedItems.length > 0) {
-    unmatchedItems.forEach((item, idx) => {
-      // Pick target category that has fewest items first to balance the sections
-      const sortedTargets = [...distributionTargets].sort((a, b) => {
-        const countA = sectionMap.get(a.id)?.items.length ?? 0;
-        const countB = sectionMap.get(b.id)?.items.length ?? 0;
-        return countA - countB;
+  // Place unmatched items into the first category if available without distributing across categories
+  if (unmatchedItems.length > 0 && distributionTargets.length > 0) {
+    const defaultTarget = distributionTargets[0];
+    const sec = sectionMap.get(defaultTarget.id);
+    if (sec) {
+      unmatchedItems.forEach((item) => {
+        sec.items.push({
+          id: item.id,
+          name: item.name,
+          description: item.description ?? "",
+          price: Number(item.price),
+          image_url: item.image_url,
+          available: item.available !== false,
+          sort_order: item.sort_order ?? 0,
+        });
       });
-
-      const target = sortedTargets[0] || distributionTargets[idx % distributionTargets.length];
-      const sec = sectionMap.get(target.id);
-      if (sec) {
-        sec.items.push({
-          id: item.id,
-          name: item.name,
-          description: item.description ?? "",
-          price: Number(item.price),
-          image_url: item.image_url,
-          available: item.available !== false,
-          sort_order: item.sort_order ?? 0,
-        });
-      }
-    });
-  } else if (
-    populatedEligibleSections.length <= 1 &&
-    distributionTargets.length > 1 &&
-    items.length > 1
-  ) {
-    // If all items were clustered in 1 category, evenly distribute food items across all non-shop categories
-    distributionTargets.forEach((cat) => {
-      const sec = sectionMap.get(cat.id);
-      if (sec) sec.items = [];
-    });
-
-    items.forEach((item, idx) => {
-      const targetCat = distributionTargets[idx % distributionTargets.length];
-      const sec = sectionMap.get(targetCat.id);
-      if (sec) {
-        sec.items.push({
-          id: item.id,
-          name: item.name,
-          description: item.description ?? "",
-          price: Number(item.price),
-          image_url: item.image_url,
-          available: item.available !== false,
-          sort_order: item.sort_order ?? 0,
-        });
-      }
-    });
+    }
   }
 
   // Sort items within each section by sort_order
