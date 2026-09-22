@@ -122,8 +122,29 @@ export function MenuItemDialog({
             c.slug === categoryId ||
             c.name.toLowerCase() === categoryId.toLowerCase(),
         );
-        if (matchedCat && isUUID(matchedCat.id)) {
-          resolvedCategoryId = matchedCat.id;
+        if (matchedCat) {
+          if (isUUID(matchedCat.id)) {
+            resolvedCategoryId = matchedCat.id;
+          } else {
+            // Attempt to insert category into DB to obtain real UUID
+            try {
+              const { data: newCat } = await supabase
+                .from("categories")
+                .insert({
+                  name: matchedCat.name,
+                  slug: matchedCat.slug,
+                  sort_order: matchedCat.sort_order ?? 0,
+                  available: true,
+                })
+                .select()
+                .single();
+              if (newCat?.id && isUUID(newCat.id)) {
+                resolvedCategoryId = newCat.id;
+              }
+            } catch (catErr) {
+              console.warn("Could not create category record:", catErr);
+            }
+          }
         }
       }
 

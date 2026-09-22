@@ -8,10 +8,60 @@ import type { MenuSection } from "@/data/menu";
 
 export const CATEGORY_ORDER_KEY = "halal_ali_category_order";
 export const ITEM_ORDER_KEY = "halal_ali_item_order";
+export const CATEGORIES_CACHE_KEY = "halal_ali_categories_cache";
+export const ITEMS_CACHE_KEY = "halal_ali_items_cache";
 export const MENU_ORDER_EVENT = "halal_ali_menu_order_updated";
 
 function isStorageAvailable(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+export function saveLocalMenuSnapshot(
+  categories: DatabaseCategory[],
+  items: DatabaseMenuItem[],
+): void {
+  if (isStorageAvailable()) {
+    try {
+      window.localStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(categories));
+      window.localStorage.setItem(ITEMS_CACHE_KEY, JSON.stringify(items));
+    } catch (e) {
+      console.warn("Failed to write menu cache to localStorage:", e);
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(MENU_ORDER_EVENT, {
+        detail: { type: "snapshot", categories, items },
+      }),
+    );
+  }
+}
+
+export function getLocalMenuSnapshot(): {
+  categories: DatabaseCategory[];
+  items: DatabaseMenuItem[];
+} | null {
+  if (!isStorageAvailable()) return null;
+  try {
+    const rawCats = window.localStorage.getItem(CATEGORIES_CACHE_KEY);
+    const rawItems = window.localStorage.getItem(ITEMS_CACHE_KEY);
+    if (!rawCats && !rawItems) return null;
+
+    const categories = rawCats ? JSON.parse(rawCats) : [];
+    const items = rawItems ? JSON.parse(rawItems) : [];
+    if (
+      Array.isArray(categories) &&
+      Array.isArray(items) &&
+      (categories.length > 0 || items.length > 0)
+    ) {
+      return { categories, items };
+    }
+    return null;
+  } catch (err) {
+    console.warn("Failed to read menu cache from localStorage:", err);
+    return null;
+  }
 }
 
 /**

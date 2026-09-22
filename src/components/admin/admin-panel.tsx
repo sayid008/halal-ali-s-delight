@@ -6,7 +6,7 @@ import {
   type DatabaseMenuItem,
   type DatabaseCategory,
 } from "@/lib/supabase";
-import { persistCategoryOrder, persistItemOrder } from "@/lib/menu-order";
+import { persistCategoryOrder, persistItemOrder, saveLocalMenuSnapshot } from "@/lib/menu-order";
 import { MenuItemDialog } from "./menu-item-dialog";
 import { CategoryDialog } from "./category-dialog";
 import { SpecialOfferManager } from "./special-offer-manager";
@@ -268,11 +268,13 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       setCategories(loadedCategories);
       setItems(loadedItems);
+      saveLocalMenuSnapshot(loadedCategories, loadedItems);
       setHasInitialLoaded(true);
     } catch (err: unknown) {
       console.error("Error loading admin data:", err);
       setCategories(defaultCategories);
       setItems(defaultItems);
+      saveLocalMenuSnapshot(defaultCategories, defaultItems);
       setHasInitialLoaded(true);
     } finally {
       setLoading(false);
@@ -292,6 +294,10 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   // Toggle Dish Visibility (Active 👁️ vs Inactive 👁️‍🗨️)
   async function handleToggleItemVisibility(item: DatabaseMenuItem) {
     const nextVal = item.available === false ? true : false;
+    const updatedItems = items.map((i) => (i.id === item.id ? { ...i, available: nextVal } : i));
+    setItems(updatedItems);
+    saveLocalMenuSnapshot(categories, updatedItems);
+
     try {
       let { error } = await supabase
         .from("menu_items")
@@ -304,7 +310,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           .eq("name", item.name);
         if (!nameRes.error) error = null;
       }
-      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, available: nextVal } : i)));
       toast.success(
         nextVal
           ? `"${item.name}" is now Active 👁️ (Visible on customer menu)`
@@ -312,13 +317,17 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       );
     } catch (err: unknown) {
       console.error("Error toggling item visibility:", err);
-      toast.error("Failed to update dish visibility");
+      toast.error("Failed to update dish visibility in database");
     }
   }
 
   // Toggle Category Visibility (Active 👁️ vs Inactive 👁️‍🗨️)
   async function handleToggleCategoryVisibility(cat: DatabaseCategory) {
     const nextVal = cat.available === false ? true : false;
+    const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, available: nextVal } : c));
+    setCategories(updatedCats);
+    saveLocalMenuSnapshot(updatedCats, items);
+
     try {
       let { error } = await supabase
         .from("categories")
@@ -331,9 +340,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           .eq("slug", cat.slug);
         if (!slugRes.error) error = null;
       }
-      setCategories((prev) =>
-        prev.map((c) => (c.id === cat.id ? { ...c, available: nextVal } : c)),
-      );
       toast.success(
         nextVal
           ? `Category "${cat.name}" is now Active 👁️ (Visible on customer menu)`
@@ -341,7 +347,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       );
     } catch (err: unknown) {
       console.error("Error toggling category visibility:", err);
-      toast.error("Failed to update category visibility");
+      toast.error("Failed to update category visibility in database");
     }
   }
 
@@ -356,6 +362,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     const now = new Date().toISOString();
+    const updatedItems = items.map((i) =>
+      i.id === item.id ? { ...i, deleted_at: now, available: false } : i,
+    );
+    setItems(updatedItems);
+    saveLocalMenuSnapshot(categories, updatedItems);
+
     try {
       let { error } = await supabase
         .from("menu_items")
@@ -368,9 +380,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           .eq("name", item.name);
         if (!nameRes.error) error = null;
       }
-      setItems((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, deleted_at: now, available: false } : i)),
-      );
       toast.success(`"${item.name}" moved to Trash (auto-purges in 30 days)`);
     } catch (err: unknown) {
       console.error("Error trashing item:", err);
@@ -390,6 +399,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (!window.confirm(confirmMessage)) return;
 
     const now = new Date().toISOString();
+    const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, deleted_at: now } : c));
+    const updatedItems = items.map((i) =>
+      i.category_id === cat.id ? { ...i, deleted_at: now, available: false } : i,
+    );
+    setCategories(updatedCats);
+    setItems(updatedItems);
+    saveLocalMenuSnapshot(updatedCats, updatedItems);
+
     try {
       // 1. Mark category as trashed in Supabase
       let { error: catErr } = await supabase
@@ -412,13 +429,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           .eq("category_id", cat.id);
       }
 
-      setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, deleted_at: now } : c)));
-      setItems((prev) =>
-        prev.map((i) =>
-          i.category_id === cat.id ? { ...i, deleted_at: now, available: false } : i,
-        ),
-      );
-
       toast.success(`Category "${cat.name}" moved to Trash`);
     } catch (err: unknown) {
       console.error("Error trashing category:", err);
@@ -429,6 +439,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Restore Item from Trash
   async function handleRestoreItem(item: DatabaseMenuItem) {
+    const updatedItems = items.map((i) =>
+      i.id === item.id ? { ...i, deleted_at: null, available: true } : i,
+    );
+    setItems(updatedItems);
+    saveLocalMenuSnapshot(categories, updatedItems);
+
     try {
       let { error } = await supabase
         .from("menu_items")
@@ -441,9 +457,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           .eq("name", item.name);
         if (!nameRes.error) error = null;
       }
-      setItems((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, deleted_at: null, available: true } : i)),
-      );
       toast.success(`"${item.name}" restored to menu!`);
     } catch (err: unknown) {
       console.error("Error restoring item:", err);
@@ -453,6 +466,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Restore Category from Trash
   async function handleRestoreCategory(cat: DatabaseCategory) {
+    const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, deleted_at: null } : c));
+    const updatedItems = items.map((i) =>
+      i.category_id === cat.id ? { ...i, deleted_at: null, available: true } : i,
+    );
+    setCategories(updatedCats);
+    setItems(updatedItems);
+    saveLocalMenuSnapshot(updatedCats, updatedItems);
+
     try {
       let { error } = await supabase
         .from("categories")
@@ -472,13 +493,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         .update({ deleted_at: null, available: true })
         .eq("category_id", cat.id);
 
-      setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, deleted_at: null } : c)));
-      setItems((prev) =>
-        prev.map((i) =>
-          i.category_id === cat.id ? { ...i, deleted_at: null, available: true } : i,
-        ),
-      );
-
       toast.success(`Category "${cat.name}" and attached dishes restored!`);
     } catch (err: unknown) {
       console.error("Error restoring category:", err);
@@ -488,12 +502,15 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Permanently Delete Item
   async function handlePermanentDeleteItem(item: DatabaseMenuItem) {
+    const updatedItems = items.filter((i) => i.id !== item.id);
+    setItems(updatedItems);
+    saveLocalMenuSnapshot(categories, updatedItems);
+
     try {
       const { error } = await supabase.from("menu_items").delete().eq("id", item.id);
       if (error || item.id.startsWith("dish-")) {
         await supabase.from("menu_items").delete().eq("name", item.name);
       }
-      setItems((prev) => prev.filter((i) => i.id !== item.id));
       toast.success(`"${item.name}" permanently deleted`);
     } catch (err: unknown) {
       console.error("Error permanently deleting item:", err);
@@ -503,16 +520,20 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Permanently Delete Category
   async function handlePermanentDeleteCategory(cat: DatabaseCategory) {
+    const updatedCats = categories.filter((c) => c.id !== cat.id);
+    const updatedItems = items.map((i) =>
+      i.category_id === cat.id ? { ...i, category_id: null } : i,
+    );
+    setCategories(updatedCats);
+    setItems(updatedItems);
+    saveLocalMenuSnapshot(updatedCats, updatedItems);
+
     try {
       await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
       const { error } = await supabase.from("categories").delete().eq("id", cat.id);
       if (error || cat.id.startsWith("cat-")) {
         await supabase.from("categories").delete().eq("slug", cat.slug);
       }
-      setCategories((prev) => prev.filter((c) => c.id !== cat.id));
-      setItems((prev) =>
-        prev.map((i) => (i.category_id === cat.id ? { ...i, category_id: null } : i)),
-      );
       toast.success(`Category "${cat.name}" permanently deleted`);
     } catch (err: unknown) {
       console.error("Error permanently deleting category:", err);
