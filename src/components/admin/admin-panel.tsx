@@ -424,6 +424,13 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         }
       }
 
+      if (loadedCategories.length === 0) {
+        loadedCategories = defaultCategories;
+      }
+      if (loadedItems.length === 0) {
+        loadedItems = defaultItems;
+      }
+
       setCategories(loadedCategories);
       setItems(loadedItems);
       saveLocalMenuSnapshot(loadedCategories, loadedItems);
