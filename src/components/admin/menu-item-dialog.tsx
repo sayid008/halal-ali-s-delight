@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase, type DatabaseMenuItem, type DatabaseCategory } from "@/lib/supabase";
+import { uploadMenuImage } from "@/lib/storage";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Upload, Image as ImageIcon, X } from "lucide-react";
+import { Loader2, Upload, Image as ImageIcon, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 interface MenuItemDialogProps {
@@ -42,6 +43,7 @@ export function MenuItemDialog({
   const [price, setPrice] = useState<string>("250");
   const [categoryId, setCategoryId] = useState<string>("");
   const [imageUrl, setImageUrl] = useState<string>("");
+  const [available, setAvailable] = useState<boolean>(true);
 
   const [uploadingImage, setUploadingImage] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,11 +55,13 @@ export function MenuItemDialog({
       setPrice(String(item.price));
       setCategoryId(item.category_id ?? (categories[0]?.id || ""));
       setImageUrl(item.image_url ?? "");
+      setAvailable(item.available !== false);
     } else {
       setName("");
       setPrice("250");
       setCategoryId(defaultCategoryId || categories[0]?.id || "");
       setImageUrl("");
+      setAvailable(true);
     }
   }, [item, open, categories, defaultCategoryId]);
 
@@ -65,33 +69,12 @@ export function MenuItemDialog({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image file must be under 5MB");
-      return;
-    }
-
     setUploadingImage(true);
     try {
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
-      const filePath = `items/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("menu-images")
-        .upload(filePath, file, {
-          cacheControl: "3600",
-          upsert: true,
-        });
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      const { data: publicData } = supabase.storage.from("menu-images").getPublicUrl(filePath);
-
-      if (publicData?.publicUrl) {
-        setImageUrl(publicData.publicUrl);
-        toast.success("Image uploaded successfully!");
+      const result = await uploadMenuImage(file, "items", name || "dish");
+      if (result.publicUrl) {
+        setImageUrl(result.publicUrl);
+        toast.success("Image uploaded successfully to Supabase Storage!");
       }
     } catch (err: unknown) {
       console.error("Image upload error:", err);
@@ -127,14 +110,22 @@ export function MenuItemDialog({
         price: numPrice,
         category_id: categoryId || null,
         image_url: imageUrl.trim() || null,
-        available: true,
+        available: available,
         sort_order: item?.sort_order ?? 0,
       };
 
       if (item) {
-        const { error } = await supabase.from("menu_items").update(payload).eq("id", item.id);
-
-        if (error) throw error;
+        if (item.id.startsWith("dish-")) {
+          // If it was a mock ID, insert it as a real database row
+          const { error } = await supabase.from("menu_items").insert(payload);
+          if (error) {
+            // Try updating if already exists by name
+            await supabase.from("menu_items").update(payload).eq("name", item.name);
+          }
+        } else {
+          const { error } = await supabase.from("menu_items").update(payload).eq("id", item.id);
+          if (error) throw error;
+        }
         toast.success(`"${name}" updated in menu!`);
       } else {
         const { error } = await supabase.from("menu_items").insert(payload);
@@ -160,7 +151,7 @@ export function MenuItemDialog({
         <DialogHeader>
           <DialogTitle>{item ? "Edit Menu Dish" : "Add New Dish"}</DialogTitle>
           <DialogDescription>
-            Enter dish details, category, price in ₹, and upload a dish image.
+            Enter dish details, category, price in ₹, visibility status, and dish image.
           </DialogDescription>
         </DialogHeader>
 
@@ -212,6 +203,54 @@ export function MenuItemDialog({
                   className="pl-7 font-mono"
                   required
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* Visibility / Active Status Section */}
+          <div className="rounded-xl border border-border/80 bg-muted/40 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  {available ? (
+                    <Eye className="size-4 text-emerald-500" />
+                  ) : (
+                    <EyeOff className="size-4 text-muted-foreground" />
+                  )}
+                  <span>Visibility Status</span>
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {available
+                    ? "Active 👁️ (Visible on customer menu)"
+                    : "Inactive 👁️‍🗨️ (Hidden from customer menu, safely kept in admin)"}
+                </p>
+              </div>
+
+              <div className="inline-flex rounded-lg border border-border bg-background p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setAvailable(true)}
+                  className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    available
+                      ? "bg-emerald-500 text-black shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Eye className="size-3" />
+                  <span>Active</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAvailable(false)}
+                  className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    !available
+                      ? "bg-muted-foreground/30 text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <EyeOff className="size-3" />
+                  <span>Inactive</span>
+                </button>
               </div>
             </div>
           </div>

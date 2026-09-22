@@ -203,37 +203,46 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
   // Persist to Supabase if configured
   if (isSupabaseConfigured) {
     try {
-      if (toSave.id) {
-        await supabase.from("special_offers").upsert({
-          id: toSave.id,
-          badge: toSave.badge,
-          title: toSave.title,
-          description: toSave.description,
-          price: toSave.price,
-          original_price: toSave.original_price || null,
-          image_url: toSave.image_url,
-          available: toSave.available,
-          show_overlay: toSave.show_overlay,
-          updated_at: toSave.updated_at,
-        });
+      const payload: Record<string, unknown> = {
+        badge: toSave.badge || "Special Combo Offer",
+        title: toSave.title || "Special Offer",
+        description: toSave.description || "",
+        price: Number(toSave.price) || 0,
+        original_price: toSave.original_price ? Number(toSave.original_price) : null,
+        image_url: toSave.image_url || "",
+        slides: toSave.slides || [],
+        available: toSave.available !== false,
+        show_overlay: toSave.show_overlay !== false,
+        autoplay: toSave.autoplay !== false,
+        updated_at: toSave.updated_at,
+      };
+
+      if (toSave.id && !toSave.id.startsWith("offer-")) {
+        payload.id = toSave.id;
+        const { error } = await supabase.from("special_offers").upsert(payload);
+        if (error) {
+          console.warn("Supabase upsert error in special_offers, falling back to insert:", error);
+          delete payload.id;
+          const { data: insData } = await supabase
+            .from("special_offers")
+            .insert(payload)
+            .select()
+            .maybeSingle();
+          if (insData?.id) {
+            toSave.id = insData.id;
+            if (isStorageAvailable()) {
+              window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+            }
+          }
+        }
       } else {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("special_offers")
-          .insert({
-            badge: toSave.badge,
-            title: toSave.title,
-            description: toSave.description,
-            price: toSave.price,
-            original_price: toSave.original_price || null,
-            image_url: toSave.image_url,
-            available: toSave.available,
-            show_overlay: toSave.show_overlay,
-            updated_at: toSave.updated_at,
-          })
+          .insert(payload)
           .select()
           .maybeSingle();
 
-        if (data?.id) {
+        if (!error && data?.id) {
           toSave.id = data.id;
           if (isStorageAvailable()) {
             window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));

@@ -28,6 +28,7 @@ export type DatabaseMenuItem = {
   available: boolean;
   sort_order: number;
   created_at: string;
+  deleted_at?: string | null;
 };
 
 export type DatabaseCategory = {
@@ -35,7 +36,9 @@ export type DatabaseCategory = {
   name: string;
   slug: string;
   sort_order: number;
+  available?: boolean;
   created_at: string;
+  deleted_at?: string | null;
 };
 
 export type MenuSectionWithItems = {

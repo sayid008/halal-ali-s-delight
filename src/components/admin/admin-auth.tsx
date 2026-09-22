@@ -53,7 +53,7 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
             to="/"
             className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground transition-colors hover:text-primary"
           >
-            <ArrowLeft className="size-3.5" /> Back to Halal Ali's Restaurant
+            <ArrowLeft className="size-3.5" /> Back to Halal Ali Dine Inn
           </Link>
         </div>
 

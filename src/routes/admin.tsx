@@ -55,7 +55,7 @@ function AdminPage() {
         <div className="text-center">
           <Loader2 className="mx-auto size-8 animate-spin text-gold" />
           <p className="mt-3 text-xs font-medium text-muted-foreground">
-            Connecting to Halal Ali's Admin...
+            Connecting to Halal Ali Dine Inn Admin...
           </p>
         </div>
       </div>

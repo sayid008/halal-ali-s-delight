@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 interface CategoryDialogProps {
@@ -25,6 +25,7 @@ export function CategoryDialog({ open, onOpenChange, category, onSaved }: Catego
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [sortOrder, setSortOrder] = useState(0);
+  const [available, setAvailable] = useState<boolean>(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -32,10 +33,12 @@ export function CategoryDialog({ open, onOpenChange, category, onSaved }: Catego
       setName(category.name);
       setSlug(category.slug);
       setSortOrder(category.sort_order);
+      setAvailable(category.available !== false);
     } else {
       setName("");
       setSlug("");
       setSortOrder(0);
+      setAvailable(true);
     }
   }, [category, open]);
 
@@ -63,22 +66,37 @@ export function CategoryDialog({ open, onOpenChange, category, onSaved }: Catego
     setSaving(true);
     try {
       if (category) {
-        const { error } = await supabase
-          .from("categories")
-          .update({
-            name: name.trim(),
-            slug: slug.trim(),
-            sort_order: Number(sortOrder),
-          })
-          .eq("id", category.id);
+        if (category.id.startsWith("cat-")) {
+          const { error } = await supabase.from("categories").upsert(
+            {
+              name: name.trim(),
+              slug: slug.trim(),
+              sort_order: Number(sortOrder),
+              available: available,
+            },
+            { onConflict: "slug" },
+          );
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from("categories")
+            .update({
+              name: name.trim(),
+              slug: slug.trim(),
+              sort_order: Number(sortOrder),
+              available: available,
+            })
+            .eq("id", category.id);
 
-        if (error) throw error;
+          if (error) throw error;
+        }
         toast.success(`Category "${name}" updated!`);
       } else {
         const { error } = await supabase.from("categories").insert({
           name: name.trim(),
           slug: slug.trim(),
           sort_order: Number(sortOrder),
+          available: available,
         });
 
         if (error) throw error;
@@ -141,6 +159,54 @@ export function CategoryDialog({ open, onOpenChange, category, onSaved }: Catego
             <p className="text-[11px] text-muted-foreground">
               Lower numbers appear first on the menu.
             </p>
+          </div>
+
+          {/* Visibility / Active Status Section */}
+          <div className="rounded-xl border border-border/80 bg-muted/40 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  {available ? (
+                    <Eye className="size-4 text-emerald-500" />
+                  ) : (
+                    <EyeOff className="size-4 text-muted-foreground" />
+                  )}
+                  <span>Visibility Status</span>
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {available
+                    ? "Active 👁️ (Visible on customer menu)"
+                    : "Inactive 👁️‍🗨️ (Hidden from customer menu, safely kept in admin)"}
+                </p>
+              </div>
+
+              <div className="inline-flex rounded-lg border border-border bg-background p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setAvailable(true)}
+                  className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    available
+                      ? "bg-emerald-500 text-black shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Eye className="size-3" />
+                  <span>Active</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAvailable(false)}
+                  className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    !available
+                      ? "bg-muted-foreground/30 text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <EyeOff className="size-3" />
+                  <span>Inactive</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <DialogFooter className="pt-2">

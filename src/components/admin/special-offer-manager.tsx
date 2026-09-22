@@ -9,6 +9,7 @@ import {
   getOfferSlides,
 } from "@/lib/special-offer";
 import { supabase, formatPrice } from "@/lib/supabase";
+import { uploadMenuImage } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -180,51 +181,15 @@ export function SpecialOfferManager() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 8 * 1024 * 1024) {
-      toast.error("Image file must be under 8MB");
-      return;
-    }
-
     setUploading(true);
     try {
-      let uploadedUrl = "";
+      const slideTitle = currentSlide?.title || `slide-${activeSlideIdx + 1}`;
+      const result = await uploadMenuImage(file, "offers", slideTitle);
 
-      // Try uploading to Supabase Storage if available
-      try {
-        const fileExt = file.name.split(".").pop();
-        const fileName = `special-offer-${Date.now()}.${fileExt}`;
-        const filePath = `offers/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("menu-images")
-          .upload(filePath, file, {
-            cacheControl: "3600",
-            upsert: true,
-          });
-
-        if (!uploadError) {
-          const { data: publicData } = supabase.storage.from("menu-images").getPublicUrl(filePath);
-
-          if (publicData?.publicUrl) {
-            uploadedUrl = publicData.publicUrl;
-          }
-        }
-      } catch (err) {
-        console.warn("Supabase storage upload fallback to local data URL:", err);
+      if (result.publicUrl) {
+        updateSlide(activeSlideIdx, { image_url: result.publicUrl });
+        toast.success(`Image for Slide #${activeSlideIdx + 1} updated!`);
       }
-
-      // If storage didn't return a URL, read as Data URL
-      if (!uploadedUrl) {
-        uploadedUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-      }
-
-      updateSlide(activeSlideIdx, { image_url: uploadedUrl });
-      toast.success(`Image for Slide #${activeSlideIdx + 1} updated!`);
     } catch (err: unknown) {
       console.error("Upload error:", err);
       const message = err instanceof Error ? err.message : "Failed to upload image.";

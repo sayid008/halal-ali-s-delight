@@ -79,13 +79,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Halal Ali's Delight" },
+      { title: "Halal Ali Dine Inn" },
       {
         name: "description",
         content:
           "Authentic Halal Dine-in & Takeaway restaurant featuring charcoal grills, curries, and biryani in London.",
       },
-      { property: "og:title", content: "Halal Ali's Delight" },
+      { property: "og:title", content: "Halal Ali Dine Inn" },
       {
         property: "og:description",
         content:

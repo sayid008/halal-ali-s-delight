@@ -47,8 +47,12 @@ export function usePublicMenu() {
         throw new Error(catRes.error?.message || itemRes.error?.message || "Failed to load");
       }
 
-      const categories = (catRes.data as DatabaseCategory[]) || [];
-      const items = ((itemRes.data as DatabaseMenuItem[]) || []).filter((i) => i.available);
+      const categories = ((catRes.data as DatabaseCategory[]) || []).filter(
+        (c) => !c.deleted_at && c.available !== false,
+      );
+      const items = ((itemRes.data as DatabaseMenuItem[]) || []).filter(
+        (i) => i.available !== false && !i.deleted_at,
+      );
 
       if (categories.length === 0) {
         // Fallback to static sections with local order
