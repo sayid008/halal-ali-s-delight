@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import type { Session } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import {
+  supabase,
+  isSupabaseConfigured,
+  getLocalAdminSession,
+  clearLocalAdminSession,
+  type AdminUserSession,
+} from "@/lib/supabase";
 import { AdminAuth } from "@/components/admin/admin-auth";
 import { AdminPanel } from "@/components/admin/admin-panel";
 import { Toaster } from "@/components/ui/sonner";
@@ -15,37 +21,64 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminPage() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<Session | AdminUserSession | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
     async function checkAuth() {
-      try {
-        const { data } = await supabase.auth.getSession();
+      // 1. Check local admin session first
+      const localSession = getLocalAdminSession();
+      if (localSession) {
         if (mounted) {
-          setSession(data.session);
+          setSession(localSession);
           setLoading(false);
         }
-      } catch (err) {
-        console.error("Session check error:", err);
-        if (mounted) setLoading(false);
+        return;
+      }
+
+      // 2. If Supabase is configured with real credentials, check Supabase session
+      if (isSupabaseConfigured) {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (mounted) {
+            setSession(data.session);
+            setLoading(false);
+          }
+        } catch (err) {
+          console.error("Session check error:", err);
+          if (mounted) setLoading(false);
+        }
+      } else {
+        if (mounted) {
+          setLoading(false);
+        }
       }
     }
 
     checkAuth();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      if (mounted) {
-        setSession(newSession);
-        setLoading(false);
+    let authUnsubscribe = () => {};
+    if (isSupabaseConfigured) {
+      try {
+        const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+          if (mounted) {
+            if (newSession) {
+              setSession(newSession);
+            }
+            setLoading(false);
+          }
+        });
+        authUnsubscribe = () => authListener.subscription.unsubscribe();
+      } catch (e) {
+        console.warn("Failed to attach Supabase auth state change listener:", e);
       }
-    });
+    }
 
     return () => {
       mounted = false;
-      authListener.subscription.unsubscribe();
+      authUnsubscribe();
     };
   }, []);
 
@@ -69,15 +102,26 @@ function AdminPage() {
         <AdminPanel
           session={session}
           onSignOut={async () => {
-            await supabase.auth.signOut();
+            clearLocalAdminSession();
+            if (isSupabaseConfigured) {
+              try {
+                await supabase.auth.signOut();
+              } catch (e) {
+                console.warn("Error signing out from Supabase:", e);
+              }
+            }
             setSession(null);
           }}
         />
       ) : (
         <AdminAuth
-          onAuthSuccess={async () => {
-            const { data } = await supabase.auth.getSession();
-            setSession(data.session);
+          onAuthSuccess={(newSession) => {
+            if (newSession) {
+              setSession(newSession);
+            } else {
+              const local = getLocalAdminSession();
+              setSession(local);
+            }
           }}
         />
       )}

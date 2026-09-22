@@ -188,12 +188,91 @@ BEGIN
     );
   END IF;
 END $$;
+
+-- ==========================================
+-- 8. DISTRIBUTE MENU ITEMS ACROSS ALL CATEGORIES (EXCEPT SHOP)
+-- ==========================================
+CREATE OR REPLACE FUNCTION public.distribute_items_across_categories_except_shop()
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_cat_count INT := 0;
+  v_item_count INT := 0;
+BEGIN
+  -- Verify non-shop categories exist
+  SELECT COUNT(*) INTO v_cat_count
+  FROM public.categories
+  WHERE deleted_at IS NULL
+    AND (available IS NULL OR available = TRUE)
+    AND LOWER(TRIM(name)) NOT IN ('shop', 'the shop', 'store', 'merchandise')
+    AND LOWER(TRIM(slug)) NOT IN ('shop', 'the-shop', 'store', 'merchandise');
+
+  IF v_cat_count = 0 THEN
+    RETURN json_build_object(
+      'success', false,
+      'message', 'No non-shop categories found to distribute items'
+    );
+  END IF;
+
+  -- Assign each active menu item to non-shop categories round-robin
+  WITH eligible_cats AS (
+    SELECT 
+      id, 
+      ROW_NUMBER() OVER (ORDER BY sort_order, name, created_at) - 1 AS cat_idx,
+      COUNT(*) OVER () AS total_cats
+    FROM public.categories
+    WHERE deleted_at IS NULL
+      AND (available IS NULL OR available = TRUE)
+      AND LOWER(TRIM(name)) NOT IN ('shop', 'the shop', 'store', 'merchandise')
+      AND LOWER(TRIM(slug)) NOT IN ('shop', 'the-shop', 'store', 'merchandise')
+  ),
+  numbered_items AS (
+    SELECT 
+      id, 
+      ROW_NUMBER() OVER (ORDER BY sort_order, created_at, id) - 1 AS item_idx
+    FROM public.menu_items
+    WHERE deleted_at IS NULL
+  ),
+  assignments AS (
+    SELECT 
+      n.id AS item_id, 
+      c.id AS target_cat_id,
+      ((n.item_idx / NULLIF(c.total_cats, 0)) * 10) + 10 AS new_sort_order
+    FROM numbered_items n
+    JOIN eligible_cats c ON (n.item_idx % c.total_cats) = c.cat_idx
+  )
+  UPDATE public.menu_items m
+  SET 
+    category_id = a.target_cat_id,
+    sort_order = a.new_sort_order
+  FROM assignments a
+  WHERE m.id = a.item_id;
+
+  GET DIAGNOSTICS v_item_count = ROW_COUNT;
+
+  RETURN json_build_object(
+    'success', true,
+    'distributed_items', v_item_count,
+    'categories_used', v_cat_count
+  );
+END;
+$$;
+
+-- Automatically run distribution if categories exist
+DO $$
+BEGIN
+  PERFORM public.distribute_items_across_categories_except_shop();
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END $$;
 `;
 
 export const SUPABASE_COMPLETE_BACKEND_SETUP_SQL = `${SUPABASE_TRASH_SQL}
 
 -- ==============================================================================
--- 8. STORAGE BUCKET FOR DISH & SPECIAL OFFER IMAGES
+-- 9. STORAGE BUCKET FOR DISH & SPECIAL OFFER IMAGES
 -- ==============================================================================
 ${SUPABASE_STORAGE_SQL}
 `;

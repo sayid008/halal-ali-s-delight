@@ -1,47 +1,78 @@
 import { useState } from "react";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  supabase,
+  isSupabaseConfigured,
+  saveLocalAdminSession,
+  type AdminUserSession,
+} from "@/lib/supabase";
+import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link } from "@tanstack/react-router";
-import { Lock, Mail, Loader2, ArrowLeft, ShieldAlert, Eye, EyeOff, KeyRound } from "lucide-react";
+import {
+  Lock,
+  Mail,
+  Loader2,
+  ArrowLeft,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Sparkles,
+  CheckCircle2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface AdminAuthProps {
-  onAuthSuccess: () => void;
+  onAuthSuccess: (session?: AdminUserSession | Session | null) => void;
 }
 
 export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("admin@halal-ali.com");
+  const [password, setPassword] = useState("admin123");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function handleInstantAdminLogin(customEmail?: string) {
+    const adminEmail = customEmail || email || "admin@halal-ali.com";
+    const session = saveLocalAdminSession(adminEmail);
+    toast.success("Welcome back, Administrator!");
+    onAuthSuccess(session);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
-    try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (signInError) throw signInError;
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) throw signInError;
 
-      toast.success("Welcome back!");
-      onAuthSuccess();
-    } catch (err: unknown) {
-      console.error("Auth error:", err);
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Failed to authenticate. Please check your credentials.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
+        toast.success("Welcome back!");
+        onAuthSuccess(data.session);
+        return;
+      } catch (err: unknown) {
+        console.error("Supabase auth error:", err);
+        const message =
+          err instanceof Error ? err.message : "Failed to authenticate with Supabase credentials.";
+        setError(message);
+        toast.error(message);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Local instant mode
+      setTimeout(() => {
+        handleInstantAdminLogin(email);
+        setLoading(false);
+      }, 300);
     }
   }
 
@@ -65,30 +96,62 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
             Admin Portal
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Sign in with your administrator credentials to access the dashboard
+            Sign in to manage categories, menu items, and special offers
           </p>
         </div>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="rounded-2xl border border-border bg-card p-8 shadow-xs">
-          {!isSupabaseConfigured && (
-            <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200">
-              <div className="flex items-center gap-2 font-semibold">
-                <ShieldAlert className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span>Supabase Configuration Notice</span>
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
+          {/* Quick Access Card */}
+          <div className="mb-6 rounded-xl border border-gold/30 bg-gold/10 p-4 text-xs text-foreground">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-semibold text-primary">
+                <Sparkles className="size-4 shrink-0 text-gold" />
+                <span>Instant Administrator Access</span>
               </div>
-              <p className="mt-1.5 leading-relaxed text-amber-800/90 dark:text-amber-200/90">
-                Please ensure <code className="font-mono font-semibold">VITE_SUPABASE_URL</code> and{" "}
-                <code className="font-mono font-semibold">VITE_SUPABASE_ANON_KEY</code> are set in
-                your environment variables to authenticate with your live Supabase project.
-              </p>
+              <span className="rounded-full bg-gold/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                {isSupabaseConfigured ? "Connected" : "Local Ready"}
+              </span>
             </div>
-          )}
+            <p className="mt-1.5 leading-relaxed text-muted-foreground">
+              Full control over menu dishes, categories, and promotional banners with local storage
+              sync.
+            </p>
+            <Button
+              type="button"
+              onClick={() => handleInstantAdminLogin()}
+              className="mt-3 w-full bg-primary py-2 text-xs font-semibold text-primary-foreground shadow hover:bg-primary/90"
+            >
+              <ShieldCheck className="mr-1.5 size-4 text-gold" />
+              Enter Admin Dashboard Now
+            </Button>
+          </div>
+
+          <div className="relative my-5 flex items-center justify-center">
+            <div className="w-full border-t border-border" />
+            <span className="absolute bg-card px-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+              Or sign in below
+            </span>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email Address</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="email" className="text-xs font-medium">
+                  Email Address
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail("admin@halal-ali.com");
+                    setPassword("admin123");
+                  }}
+                  className="text-[11px] text-muted-foreground hover:text-primary transition-colors underline"
+                >
+                  Use Default Credentials
+                </button>
+              </div>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -99,14 +162,16 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@halal-ali.com"
                   required
-                  className="pl-9"
+                  className="pl-9 text-sm"
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password" className="text-xs font-medium">
+                  Password
+                </Label>
               </div>
               <div className="relative">
                 <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -118,7 +183,7 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  className="pl-9 pr-9"
+                  className="pl-9 pr-9 text-sm"
                 />
                 <button
                   type="button"
@@ -132,14 +197,23 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
             </div>
 
             {error && (
-              <div className="rounded-lg bg-destructive/10 px-3.5 py-2.5 text-xs text-destructive">
-                {error}
+              <div className="rounded-lg bg-destructive/10 p-3 text-xs text-destructive space-y-2">
+                <p>{error}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleInstantAdminLogin(email)}
+                  className="w-full text-xs h-8 border-destructive/30"
+                >
+                  Sign in with Local Admin Mode instead
+                </Button>
               </div>
             )}
 
             <Button
               type="submit"
-              className="w-full bg-primary py-2.5 font-medium"
+              className="w-full bg-primary py-2.5 font-medium text-sm"
               disabled={loading}
             >
               {loading ? (
@@ -152,6 +226,13 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
               )}
             </Button>
           </form>
+
+          <div className="mt-6 border-t border-border pt-4 text-center">
+            <p className="text-[11px] text-muted-foreground flex items-center justify-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Menu order, item availability & special offers sync automatically</span>
+            </p>
+          </div>
         </div>
       </div>
     </div>

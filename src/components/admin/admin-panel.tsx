@@ -3,10 +3,20 @@ import type { Session } from "@supabase/supabase-js";
 import {
   supabase,
   formatPrice,
+  isSupabaseConfigured,
+  isShopCategory,
+  distributeItemsAcrossCategories,
   type DatabaseMenuItem,
   type DatabaseCategory,
+  type AdminUserSession,
 } from "@/lib/supabase";
-import { persistCategoryOrder, persistItemOrder, saveLocalMenuSnapshot } from "@/lib/menu-order";
+import {
+  persistCategoryOrder,
+  persistItemOrder,
+  saveLocalMenuSnapshot,
+  getLocalMenuSnapshot,
+  MENU_ORDER_EVENT,
+} from "@/lib/menu-order";
 import { MenuItemDialog } from "./menu-item-dialog";
 import { CategoryDialog } from "./category-dialog";
 import { SpecialOfferManager } from "./special-offer-manager";
@@ -35,13 +45,21 @@ import {
   Check,
   Eye,
   EyeOff,
+  Loader2,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { menuSections as homeSections } from "@/data/menu";
 
 interface AdminPanelProps {
-  session: Session;
+  session: Session | AdminUserSession | { user: { email?: string } };
   onSignOut: () => void;
+}
+
+function isUUIDFormat(str?: string | null): boolean {
+  return Boolean(
+    str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
+  );
 }
 
 // Convert home page static menu items into structured defaults
@@ -96,6 +114,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     return defaultCategories;
   });
   const [loading, setLoading] = useState(false);
+  const [distributing, setDistributing] = useState(false);
 
   // Active Tab with URL synchronization
   const [activeTab, setActiveTab] = useState<"items" | "categories" | "special_offer" | "trash">(
@@ -152,6 +171,23 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   async function loadData() {
     setLoading(true);
     setDbTableError(null);
+
+    // If Supabase is not configured, immediately use local snapshot and defaults without network delays
+    if (!isSupabaseConfigured) {
+      const cached = getLocalMenuSnapshot();
+      if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+        setCategories(cached.categories);
+        setItems(cached.items || []);
+      } else {
+        setCategories(defaultCategories);
+        setItems(defaultItems);
+        saveLocalMenuSnapshot(defaultCategories, defaultItems);
+      }
+      setHasInitialLoaded(true);
+      setLoading(false);
+      return;
+    }
+
     try {
       const [catRes, itemRes] = await Promise.all([
         supabase.from("categories").select("*").order("sort_order", { ascending: true }),
@@ -284,6 +320,81 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         }
       }
 
+      // Ensure items are distributed across all active database categories (except Shop)
+      const nonShopCategories = loadedCategories.filter(
+        (c) => !c.deleted_at && c.available !== false && !isShopCategory(c),
+      );
+
+      // If categories exist in database but items table is empty, seed items distributed across non-shop categories
+      if (
+        !hasInitialLoaded &&
+        nonShopCategories.length > 0 &&
+        loadedItems.length === 0 &&
+        !itemRes.error
+      ) {
+        try {
+          const sortedNonShop = [...nonShopCategories].sort(
+            (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+          );
+          const dishSeeds = defaultItems.map((dish, dIdx) => {
+            const targetCat = sortedNonShop[dIdx % sortedNonShop.length];
+            return {
+              name: dish.name,
+              description: dish.description,
+              price: dish.price,
+              category_id: targetCat && isUUIDFormat(targetCat.id) ? targetCat.id : null,
+              image_url: dish.image_url,
+              available: true,
+              sort_order: Math.floor(dIdx / sortedNonShop.length) * 10 + 10,
+            };
+          });
+
+          const { data: inserted } = await supabase.from("menu_items").insert(dishSeeds).select();
+          if (inserted && inserted.length > 0) {
+            loadedItems = inserted as DatabaseMenuItem[];
+          }
+        } catch (e) {
+          console.warn("Could not seed items to empty database:", e);
+        }
+      }
+
+      // If items exist, check if items are properly distributed across all categories (except shop)
+      if (nonShopCategories.length > 1 && loadedItems.length > 1) {
+        const sortedNonShop = [...nonShopCategories].sort(
+          (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+        );
+        const validCatIds = new Set(sortedNonShop.map((c) => c.id));
+        const activeDishes = loadedItems.filter((i) => !i.deleted_at);
+
+        const properlyAssignedDishes = activeDishes.filter(
+          (i) => i.category_id && validCatIds.has(i.category_id),
+        );
+        const categoriesWithItems = new Set(properlyAssignedDishes.map((i) => i.category_id));
+
+        // If more than 35% of dishes are unassigned or all dishes are in 1 category:
+        if (
+          properlyAssignedDishes.length < activeDishes.length * 0.65 ||
+          categoriesWithItems.size <= 1
+        ) {
+          const { updatedItems } = distributeItemsAcrossCategories(loadedCategories, loadedItems);
+          loadedItems = updatedItems;
+
+          if (isSupabaseConfigured) {
+            for (const item of updatedItems.filter((i) => !i.deleted_at)) {
+              if (item.id && isUUIDFormat(item.id)) {
+                const catIdToUse = isUUIDFormat(item.category_id) ? item.category_id : null;
+                supabase
+                  .from("menu_items")
+                  .update({ category_id: catIdToUse, sort_order: item.sort_order })
+                  .eq("id", item.id)
+                  .then(() => {})
+                  .catch((e) => console.warn("Auto-sync item distribution error:", e));
+              }
+            }
+          }
+        }
+      }
+
       setCategories(loadedCategories);
       setItems(loadedItems);
       saveLocalMenuSnapshot(loadedCategories, loadedItems);
@@ -323,26 +434,28 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     setItems(updatedItems);
     saveLocalMenuSnapshot(categories, updatedItems);
 
-    try {
-      let { error } = await supabase
-        .from("menu_items")
-        .update({ available: nextVal })
-        .eq("id", item.id);
-      if (error || item.id.startsWith("dish-")) {
-        const nameRes = await supabase
+    toast.success(
+      nextVal
+        ? `"${item.name}" is now Active 👁️ (Visible on customer menu)`
+        : `"${item.name}" is now Inactive 👁️‍🗨️ (Hidden from customer menu)`,
+    );
+
+    if (isSupabaseConfigured) {
+      try {
+        let { error } = await supabase
           .from("menu_items")
           .update({ available: nextVal })
-          .eq("name", item.name);
-        if (!nameRes.error) error = null;
+          .eq("id", item.id);
+        if (error || item.id.startsWith("dish-")) {
+          const nameRes = await supabase
+            .from("menu_items")
+            .update({ available: nextVal })
+            .eq("name", item.name);
+          if (!nameRes.error) error = null;
+        }
+      } catch (err: unknown) {
+        console.warn("Could not sync item visibility to Supabase:", err);
       }
-      toast.success(
-        nextVal
-          ? `"${item.name}" is now Active 👁️ (Visible on customer menu)`
-          : `"${item.name}" is now Inactive 👁️‍🗨️ (Hidden from customer menu)`,
-      );
-    } catch (err: unknown) {
-      console.error("Error toggling item visibility:", err);
-      toast.error("Failed to update dish visibility in database");
     }
   }
 
@@ -353,26 +466,28 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     setCategories(updatedCats);
     saveLocalMenuSnapshot(updatedCats, items);
 
-    try {
-      let { error } = await supabase
-        .from("categories")
-        .update({ available: nextVal })
-        .eq("id", cat.id);
-      if (error || cat.id.startsWith("cat-")) {
-        const slugRes = await supabase
+    toast.success(
+      nextVal
+        ? `Category "${cat.name}" is now Active 👁️ (Visible on customer menu)`
+        : `Category "${cat.name}" is now Inactive 👁️‍🗨️ (Hidden from customer menu)`,
+    );
+
+    if (isSupabaseConfigured) {
+      try {
+        let { error } = await supabase
           .from("categories")
           .update({ available: nextVal })
-          .eq("slug", cat.slug);
-        if (!slugRes.error) error = null;
+          .eq("id", cat.id);
+        if (error || cat.id.startsWith("cat-")) {
+          const slugRes = await supabase
+            .from("categories")
+            .update({ available: nextVal })
+            .eq("slug", cat.slug);
+          if (!slugRes.error) error = null;
+        }
+      } catch (err: unknown) {
+        console.warn("Could not sync category visibility to Supabase:", err);
       }
-      toast.success(
-        nextVal
-          ? `Category "${cat.name}" is now Active 👁️ (Visible on customer menu)`
-          : `Category "${cat.name}" is now Inactive 👁️‍🗨️ (Hidden from customer menu)`,
-      );
-    } catch (err: unknown) {
-      console.error("Error toggling category visibility:", err);
-      toast.error("Failed to update category visibility in database");
     }
   }
 
@@ -392,24 +507,23 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     );
     setItems(updatedItems);
     saveLocalMenuSnapshot(categories, updatedItems);
+    toast.success(`"${item.name}" moved to Trash (auto-purges in 30 days)`);
 
-    try {
-      let { error } = await supabase
-        .from("menu_items")
-        .update({ deleted_at: now, available: false })
-        .eq("id", item.id);
-      if (error || item.id.startsWith("dish-")) {
-        const nameRes = await supabase
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase
           .from("menu_items")
           .update({ deleted_at: now, available: false })
-          .eq("name", item.name);
-        if (!nameRes.error) error = null;
+          .eq("id", item.id);
+        if (error || item.id.startsWith("dish-")) {
+          await supabase
+            .from("menu_items")
+            .update({ deleted_at: now, available: false })
+            .eq("name", item.name);
+        }
+      } catch (err: unknown) {
+        console.warn("Could not sync trashed item to Supabase:", err);
       }
-      toast.success(`"${item.name}" moved to Trash (auto-purges in 30 days)`);
-    } catch (err: unknown) {
-      console.error("Error trashing item:", err);
-      const message = err instanceof Error ? err.message : "Failed to move item to trash";
-      toast.error(message);
     }
   }
 
@@ -438,34 +552,27 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     setCategories(updatedCats);
     setItems(updatedItems);
     saveLocalMenuSnapshot(updatedCats, updatedItems);
+    toast.success(`Category "${cat.name}" moved to Trash`);
 
-    try {
-      // 1. Mark category as trashed in Supabase
-      let { error: catErr } = await supabase
-        .from("categories")
-        .update({ deleted_at: now })
-        .eq("id", cat.id);
-      if (catErr || cat.id.startsWith("cat-")) {
-        const slugRes = await supabase
+    if (isSupabaseConfigured) {
+      try {
+        const { error: catErr } = await supabase
           .from("categories")
           .update({ deleted_at: now })
-          .eq("slug", cat.slug);
-        if (!slugRes.error) catErr = null;
-      }
+          .eq("id", cat.id);
+        if (catErr || cat.id.startsWith("cat-")) {
+          await supabase.from("categories").update({ deleted_at: now }).eq("slug", cat.slug);
+        }
 
-      // 2. Mark attached items as trashed
-      if (associatedItems.length > 0) {
-        await supabase
-          .from("menu_items")
-          .update({ deleted_at: now, available: false })
-          .eq("category_id", cat.id);
+        if (associatedItems.length > 0) {
+          await supabase
+            .from("menu_items")
+            .update({ deleted_at: now, available: false })
+            .eq("category_id", cat.id);
+        }
+      } catch (err: unknown) {
+        console.warn("Could not sync trashed category to Supabase:", err);
       }
-
-      toast.success(`Category "${cat.name}" moved to Trash`);
-    } catch (err: unknown) {
-      console.error("Error trashing category:", err);
-      const message = err instanceof Error ? err.message : "Failed to move category to trash";
-      toast.error(message);
     }
   }
 
@@ -476,23 +583,23 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     );
     setItems(updatedItems);
     saveLocalMenuSnapshot(categories, updatedItems);
+    toast.success(`"${item.name}" restored to menu!`);
 
-    try {
-      let { error } = await supabase
-        .from("menu_items")
-        .update({ deleted_at: null, available: true })
-        .eq("id", item.id);
-      if (error || item.id.startsWith("dish-")) {
-        const nameRes = await supabase
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase
           .from("menu_items")
           .update({ deleted_at: null, available: true })
-          .eq("name", item.name);
-        if (!nameRes.error) error = null;
+          .eq("id", item.id);
+        if (error || item.id.startsWith("dish-")) {
+          await supabase
+            .from("menu_items")
+            .update({ deleted_at: null, available: true })
+            .eq("name", item.name);
+        }
+      } catch (err: unknown) {
+        console.warn("Could not sync restore item to Supabase:", err);
       }
-      toast.success(`"${item.name}" restored to menu!`);
-    } catch (err: unknown) {
-      console.error("Error restoring item:", err);
-      toast.error("Failed to restore item");
     }
   }
 
@@ -512,30 +619,25 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     setCategories(updatedCats);
     setItems(updatedItems);
     saveLocalMenuSnapshot(updatedCats, updatedItems);
+    toast.success(`Category "${cat.name}" and attached dishes restored!`);
 
-    try {
-      let { error } = await supabase
-        .from("categories")
-        .update({ deleted_at: null })
-        .eq("id", cat.id);
-      if (error || cat.id.startsWith("cat-")) {
-        const slugRes = await supabase
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase
           .from("categories")
           .update({ deleted_at: null })
-          .eq("slug", cat.slug);
-        if (!slugRes.error) error = null;
+          .eq("id", cat.id);
+        if (error || cat.id.startsWith("cat-")) {
+          await supabase.from("categories").update({ deleted_at: null }).eq("slug", cat.slug);
+        }
+
+        await supabase
+          .from("menu_items")
+          .update({ deleted_at: null, available: true })
+          .eq("category_id", cat.id);
+      } catch (err: unknown) {
+        console.warn("Could not sync restore category to Supabase:", err);
       }
-
-      // Also restore attached dishes
-      await supabase
-        .from("menu_items")
-        .update({ deleted_at: null, available: true })
-        .eq("category_id", cat.id);
-
-      toast.success(`Category "${cat.name}" and attached dishes restored!`);
-    } catch (err: unknown) {
-      console.error("Error restoring category:", err);
-      toast.error("Failed to restore category");
     }
   }
 
@@ -544,16 +646,17 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const updatedItems = items.filter((i) => i.id !== item.id);
     setItems(updatedItems);
     saveLocalMenuSnapshot(categories, updatedItems);
+    toast.success(`"${item.name}" permanently deleted`);
 
-    try {
-      const { error } = await supabase.from("menu_items").delete().eq("id", item.id);
-      if (error || item.id.startsWith("dish-")) {
-        await supabase.from("menu_items").delete().eq("name", item.name);
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase.from("menu_items").delete().eq("id", item.id);
+        if (error || item.id.startsWith("dish-")) {
+          await supabase.from("menu_items").delete().eq("name", item.name);
+        }
+      } catch (err: unknown) {
+        console.warn("Could not sync permanent delete item to Supabase:", err);
       }
-      toast.success(`"${item.name}" permanently deleted`);
-    } catch (err: unknown) {
-      console.error("Error permanently deleting item:", err);
-      toast.error("Failed to permanently delete item");
     }
   }
 
@@ -571,40 +674,42 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     setCategories(updatedCats);
     setItems(updatedItems);
     saveLocalMenuSnapshot(updatedCats, updatedItems);
+    toast.success(`Category "${cat.name}" permanently deleted`);
 
-    try {
-      await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
-      const { error } = await supabase.from("categories").delete().eq("id", cat.id);
-      if (error || cat.id.startsWith("cat-")) {
-        await supabase.from("categories").delete().eq("slug", cat.slug);
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
+        const { error } = await supabase.from("categories").delete().eq("id", cat.id);
+        if (error || cat.id.startsWith("cat-")) {
+          await supabase.from("categories").delete().eq("slug", cat.slug);
+        }
+      } catch (err: unknown) {
+        console.warn("Could not sync permanent delete category to Supabase:", err);
       }
-      toast.success(`Category "${cat.name}" permanently deleted`);
-    } catch (err: unknown) {
-      console.error("Error permanently deleting category:", err);
-      toast.error("Failed to permanently delete category");
     }
   }
 
   // Empty Entire Trash
   async function handleEmptyTrash() {
-    try {
-      // Hard delete trashed menu items
-      await supabase.from("menu_items").delete().not("deleted_at", "is", null);
+    setItems((prev) => prev.filter((i) => !i.deleted_at));
+    setCategories((prev) => prev.filter((c) => !c.deleted_at));
+    toast.success("Trash emptied permanently");
 
-      // Unlink attached dishes from trashed categories
-      for (const cat of trashedCategories) {
-        await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
+    if (isSupabaseConfigured) {
+      try {
+        // Hard delete trashed menu items
+        await supabase.from("menu_items").delete().not("deleted_at", "is", null);
+
+        // Unlink attached dishes from trashed categories
+        for (const cat of trashedCategories) {
+          await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
+        }
+
+        // Hard delete trashed categories
+        await supabase.from("categories").delete().not("deleted_at", "is", null);
+      } catch (err: unknown) {
+        console.warn("Could not sync empty trash to Supabase:", err);
       }
-
-      // Hard delete trashed categories
-      await supabase.from("categories").delete().not("deleted_at", "is", null);
-
-      setItems((prev) => prev.filter((i) => !i.deleted_at));
-      setCategories((prev) => prev.filter((c) => !c.deleted_at));
-      toast.success("Trash emptied permanently");
-    } catch (err: unknown) {
-      console.error("Error emptying trash:", err);
-      toast.error("Failed to empty trash");
     }
   }
 
@@ -648,50 +753,56 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
     toast.success(isEditing ? `"${data.name}" updated!` : `"${data.name}" added to menu!`);
 
-    // Sync to Supabase in the background
-    try {
-      const isUUIDFormat = (str?: string | null): boolean =>
-        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+    // Sync to Supabase in the background if configured
+    if (isSupabaseConfigured) {
+      try {
+        const isUUIDFormat = (str?: string | null): boolean =>
+          Boolean(
+            str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
+          );
 
-      let dbCategoryId = data.category_id;
-      if (dbCategoryId && !isUUIDFormat(dbCategoryId)) {
-        const matched = categories.find(
-          (c) =>
-            c.id === dbCategoryId ||
-            c.slug === dbCategoryId ||
-            c.name.toLowerCase() === dbCategoryId?.toLowerCase(),
-        );
-        if (matched && isUUIDFormat(matched.id)) {
-          dbCategoryId = matched.id;
+        let dbCategoryId = data.category_id;
+        if (dbCategoryId && !isUUIDFormat(dbCategoryId)) {
+          const matched = categories.find(
+            (c) =>
+              c.id === dbCategoryId ||
+              c.slug === dbCategoryId ||
+              c.name.toLowerCase() === dbCategoryId?.toLowerCase(),
+          );
+          if (matched && isUUIDFormat(matched.id)) {
+            dbCategoryId = matched.id;
+          }
         }
-      }
 
-      const dbPayload = {
-        name: data.name,
-        description: data.description,
-        price: data.price,
-        category_id: dbCategoryId && isUUIDFormat(dbCategoryId) ? dbCategoryId : null,
-        image_url: data.image_url,
-        available: data.available,
-        sort_order: data.sort_order,
-      };
+        const dbPayload = {
+          name: data.name,
+          description: data.description,
+          price: data.price,
+          category_id: dbCategoryId && isUUIDFormat(dbCategoryId) ? dbCategoryId : null,
+          image_url: data.image_url,
+          available: data.available,
+          sort_order: data.sort_order,
+        };
 
-      if (isEditing && data.id && isUUIDFormat(data.id)) {
-        await supabase.from("menu_items").update(dbPayload).eq("id", data.id);
-      } else {
-        const { data: inserted } = await supabase
-          .from("menu_items")
-          .insert(dbPayload)
-          .select()
-          .single();
-        if (inserted?.id) {
-          const finalItems = newItems.map((i) => (i.id === itemId ? { ...i, id: inserted.id } : i));
-          setItems(finalItems);
-          saveLocalMenuSnapshot(categories, finalItems);
+        if (isEditing && data.id && isUUIDFormat(data.id)) {
+          await supabase.from("menu_items").update(dbPayload).eq("id", data.id);
+        } else {
+          const { data: inserted } = await supabase
+            .from("menu_items")
+            .insert(dbPayload)
+            .select()
+            .single();
+          if (inserted?.id) {
+            const finalItems = newItems.map((i) =>
+              i.id === itemId ? { ...i, id: inserted.id } : i,
+            );
+            setItems(finalItems);
+            saveLocalMenuSnapshot(categories, finalItems);
+          }
         }
+      } catch (dbErr) {
+        console.warn("Could not sync item to Supabase:", dbErr);
       }
-    } catch (dbErr) {
-      console.warn("Could not sync item to Supabase:", dbErr);
     }
   }
 
@@ -746,34 +857,38 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
     );
 
-    // Sync to Supabase in the background
-    try {
-      const isUUIDFormat = (str?: string | null): boolean =>
-        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+    // Sync to Supabase in the background if configured
+    if (isSupabaseConfigured) {
+      try {
+        const isUUIDFormat = (str?: string | null): boolean =>
+          Boolean(
+            str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
+          );
 
-      const dbPayload = {
-        name: data.name,
-        slug: data.slug,
-        sort_order: data.sort_order,
-        available: data.available,
-      };
+        const dbPayload = {
+          name: data.name,
+          slug: data.slug,
+          sort_order: data.sort_order,
+          available: data.available,
+        };
 
-      if (isEditing && data.id && isUUIDFormat(data.id)) {
-        await supabase.from("categories").update(dbPayload).eq("id", data.id);
-      } else {
-        const { data: inserted } = await supabase
-          .from("categories")
-          .insert(dbPayload)
-          .select()
-          .single();
-        if (inserted?.id) {
-          const finalCats = newCats.map((c) => (c.id === catId ? { ...c, id: inserted.id } : c));
-          setCategories(finalCats);
-          saveLocalMenuSnapshot(finalCats, items);
+        if (isEditing && data.id && isUUIDFormat(data.id)) {
+          await supabase.from("categories").update(dbPayload).eq("id", data.id);
+        } else {
+          const { data: inserted } = await supabase
+            .from("categories")
+            .insert(dbPayload)
+            .select()
+            .single();
+          if (inserted?.id) {
+            const finalCats = newCats.map((c) => (c.id === catId ? { ...c, id: inserted.id } : c));
+            setCategories(finalCats);
+            saveLocalMenuSnapshot(finalCats, items);
+          }
         }
+      } catch (dbErr) {
+        console.warn("Could not sync category to Supabase:", dbErr);
       }
-    } catch (dbErr) {
-      console.warn("Could not sync category to Supabase:", dbErr);
     }
   }
 
@@ -895,6 +1010,83 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     handleReorderCategories(idx, targetIdx);
   }
 
+  // Distribute all active dishes evenly across all active categories, strictly excluding Shop
+  async function handleDistributeAcrossCategories() {
+    const eligibleCategories = categories.filter(
+      (c) => !c.deleted_at && c.available !== false && !isShopCategory(c),
+    );
+
+    if (eligibleCategories.length === 0) {
+      toast.error(
+        "No eligible food categories found (Shop is excluded). Please add categories first.",
+      );
+      return;
+    }
+
+    const activeDishList = items.filter((i) => !i.deleted_at);
+    if (activeDishList.length === 0) {
+      toast.error("No active menu dishes found to distribute.");
+      return;
+    }
+
+    setDistributing(true);
+    try {
+      const { updatedItems, distributedCount, categoriesUsed } = distributeItemsAcrossCategories(
+        categories,
+        items,
+      );
+
+      setItems(updatedItems);
+      saveLocalMenuSnapshot(categories, updatedItems);
+
+      // Sync updated items to Supabase in background
+      if (isSupabaseConfigured) {
+        for (const item of updatedItems.filter((i) => !i.deleted_at)) {
+          try {
+            let catIdToSave = item.category_id;
+            if (catIdToSave && !isUUIDFormat(catIdToSave)) {
+              const matched = categories.find(
+                (c) =>
+                  c.id === catIdToSave ||
+                  c.slug === catIdToSave ||
+                  c.name.toLowerCase() === catIdToSave?.toLowerCase(),
+              );
+              if (matched && isUUIDFormat(matched.id)) {
+                catIdToSave = matched.id;
+              }
+            }
+
+            const dbPayload = {
+              category_id: catIdToSave && isUUIDFormat(catIdToSave) ? catIdToSave : null,
+              sort_order: item.sort_order,
+            };
+
+            if (item.id && isUUIDFormat(item.id)) {
+              await supabase.from("menu_items").update(dbPayload).eq("id", item.id);
+            } else {
+              await supabase.from("menu_items").update(dbPayload).eq("name", item.name);
+            }
+          } catch (syncErr) {
+            console.warn("Item distribution sync error:", syncErr);
+          }
+        }
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(MENU_ORDER_EVENT));
+      }
+
+      toast.success(
+        `Successfully distributed ${distributedCount} dishes across ${categoriesUsed} categories (Shop excluded) and saved to database!`,
+      );
+    } catch (err) {
+      console.error("Distribution error:", err);
+      toast.error("Failed to distribute dishes across categories.");
+    } finally {
+      setDistributing(false);
+    }
+  }
+
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-background text-primary">
       {/* Top Header */}
@@ -915,9 +1107,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                 >
                   Admin
                 </Badge>
+                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 text-muted-foreground">
+                  {isSupabaseConfigured ? "Cloud Synced" : "Local Synced"}
+                </Badge>
               </div>
               <p className="text-[10px] sm:text-xs text-muted-foreground truncate max-w-[140px] xs:max-w-[200px] sm:max-w-none">
-                {session.user.email}
+                {session?.user?.email || "admin@halal-ali.com"}
               </p>
             </div>
           </div>
@@ -1091,7 +1286,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             </button>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
             <Button
               variant="outline"
               size="sm"
@@ -1103,6 +1298,27 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               <RefreshCw className={`size-3 ${loading ? "animate-spin" : ""}`} />
               <span className="hidden xs:inline">Refresh</span>
             </Button>
+
+            {(activeTab === "items" || activeTab === "categories") && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDistributeAcrossCategories}
+                disabled={distributing}
+                className="h-8 gap-1.5 border-gold/40 hover:bg-gold/10 text-xs font-medium shrink-0"
+                title="Distribute dishes across all categories except Shop and save to database"
+              >
+                {distributing ? (
+                  <Loader2 className="size-3.5 animate-spin text-gold" />
+                ) : (
+                  <Layers className="size-3.5 text-gold" />
+                )}
+                <span>Distribute Across Categories</span>
+                <span className="hidden sm:inline-block rounded bg-gold/15 px-1 py-0.2 text-[9px] font-semibold text-gold uppercase tracking-wider">
+                  No Shop
+                </span>
+              </Button>
+            )}
 
             {activeTab === "items" && (
               <Button
@@ -1192,9 +1408,10 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                   <option value="all">All Categories ({activeItems.length})</option>
                   {sortedCategories.map((cat) => {
                     const count = activeItems.filter((i) => i.category_id === cat.id).length;
+                    const isShop = isShopCategory(cat);
                     return (
                       <option key={cat.id} value={cat.id}>
-                        {cat.name} ({count})
+                        {cat.name} ({count}){isShop ? " — Shop (Excluded)" : ""}
                       </option>
                     );
                   })}
@@ -1607,6 +1824,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                               <h4 className="font-medium text-xs text-foreground truncate">
                                 {cat.name}
                               </h4>
+                              {isShopCategory(cat) && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1.5 py-0 font-medium text-amber-500 border-amber-500/40 bg-amber-500/10 shrink-0"
+                                >
+                                  Shop (Excluded)
+                                </Badge>
+                              )}
                               <Badge
                                 variant="secondary"
                                 className="text-[9px] px-1.5 py-0 font-normal shrink-0"
@@ -1731,7 +1956,17 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                               </td>
 
                               <td className="px-4 py-2 font-medium text-foreground text-xs">
-                                {cat.name}
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{cat.name}</span>
+                                  {isShopCategory(cat) && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[9px] px-1.5 py-0 font-medium text-amber-500 border-amber-500/40 bg-amber-500/10 shrink-0"
+                                    >
+                                      Shop (Excluded)
+                                    </Badge>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-4 py-2 font-mono text-muted-foreground text-[11px]">
                                 /{cat.slug}

@@ -5,6 +5,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { MenuItemRow } from "@/components/menu-item-row";
 import { restaurant, menuSections as staticSections } from "@/data/menu";
 import { usePublicMenu } from "@/hooks/use-public-menu";
+import { isShopCategory } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
 
 const title = "Menu — Halal Ali Dine Inn & Take Away";
@@ -234,7 +235,9 @@ function MenuPage() {
                   section.items.map((item) => <MenuItemRow key={item.name} item={item} />)
                 ) : (
                   <p className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
-                    No dishes added to this section yet.
+                    {isShopCategory({ name: section.title, slug: section.id })
+                      ? "Shop items coming soon. Enjoy our freshly prepared kitchen menu above."
+                      : "No dishes added to this section yet."}
                   </p>
                 )}
               </div>

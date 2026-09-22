@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { MenuSection } from "@/data/menu";
 import { MenuItemRow } from "@/components/menu-item-row";
+import { isShopCategory } from "@/lib/supabase";
 import heroBiryani from "@/assets/hero-biryani.jpg";
 
 type Category = {
@@ -156,7 +157,9 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
                     </div>
                   ) : (
                     <p className="rounded-xl border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
-                      No dishes added to this section yet.
+                      {isShopCategory({ name: section.title, slug: section.id })
+                        ? "Shop and retail items coming soon. Enjoy our hot kitchen menu above."
+                        : "No dishes added to this section yet."}
                     </p>
                   )}
                 </div>
