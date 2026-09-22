@@ -132,25 +132,36 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
       const isUUID = (str?: string | null) =>
         Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
 
-      const updates = updated.map((cat) => {
+      for (const cat of updated) {
+        const payload = {
+          name: cat.name,
+          slug: cat.slug || cat.id,
+          sort_order: cat.sort_order,
+          available: cat.available !== false,
+        };
+
         if (cat.id && isUUID(cat.id)) {
-          return supabase
+          const { data: res } = await supabase
             .from("categories")
             .update({ sort_order: cat.sort_order })
-            .eq("id", cat.id);
+            .eq("id", cat.id)
+            .select();
+
+          if (!res || res.length === 0) {
+            await supabase.from("categories").upsert({ ...payload, id: cat.id });
+          }
         } else if (cat.slug) {
-          return supabase
+          const { data: res } = await supabase
             .from("categories")
             .update({ sort_order: cat.sort_order })
-            .eq("slug", cat.slug);
-        } else {
-          return supabase
-            .from("categories")
-            .update({ sort_order: cat.sort_order })
-            .eq("name", cat.name);
+            .eq("slug", cat.slug)
+            .select();
+
+          if (!res || res.length === 0) {
+            await supabase.from("categories").upsert(payload, { onConflict: "slug" });
+          }
         }
-      });
-      await Promise.all(updates);
+      }
     } catch (err) {
       console.warn("Supabase category sort order update error:", err);
     }
@@ -199,20 +210,51 @@ export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Prom
       const isUUID = (str?: string | null) =>
         Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
 
-      const updates = updated.map((item) => {
-        if (item.id && isUUID(item.id)) {
-          return supabase
-            .from("menu_items")
-            .update({ sort_order: item.sort_order })
-            .eq("id", item.id);
-        } else {
-          return supabase
-            .from("menu_items")
-            .update({ sort_order: item.sort_order })
-            .eq("name", item.name);
+      const snapshot = getLocalMenuSnapshot();
+
+      for (const item of updated) {
+        let dbCatId = item.category_id;
+        if (dbCatId && !isUUID(dbCatId) && snapshot?.categories) {
+          const matched = snapshot.categories.find(
+            (c) => c.id === dbCatId || c.slug === dbCatId || c.name === dbCatId,
+          );
+          if (matched && isUUID(matched.id)) {
+            dbCatId = matched.id;
+          }
         }
-      });
-      await Promise.all(updates);
+
+        const payload = {
+          name: item.name,
+          description: item.description,
+          price: Number(item.price) || 0,
+          category_id: dbCatId && isUUID(dbCatId) ? dbCatId : null,
+          image_url: item.image_url,
+          available: item.available !== false,
+          sort_order: item.sort_order,
+        };
+
+        if (item.id && isUUID(item.id)) {
+          const { data: res } = await supabase
+            .from("menu_items")
+            .update({ sort_order: item.sort_order })
+            .eq("id", item.id)
+            .select();
+
+          if (!res || res.length === 0) {
+            await supabase.from("menu_items").upsert({ ...payload, id: item.id });
+          }
+        } else {
+          const { data: res } = await supabase
+            .from("menu_items")
+            .update({ sort_order: item.sort_order })
+            .eq("name", item.name)
+            .select();
+
+          if (!res || res.length === 0) {
+            await supabase.from("menu_items").upsert(payload, { onConflict: "name" });
+          }
+        }
+      }
     } catch (err) {
       console.warn("Supabase menu item sort order update error:", err);
     }
