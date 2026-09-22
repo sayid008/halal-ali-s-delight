@@ -194,12 +194,29 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
       ]);
 
-      if (
-        (catRes.error && catRes.error.message.includes("relation")) ||
-        (itemRes.error && itemRes.error.message.includes("relation"))
-      ) {
+      const isCatTableMissing = Boolean(
+        catRes.error &&
+        (catRes.error.code === "PGRST205" ||
+          catRes.error.message.toLowerCase().includes("not find") ||
+          catRes.error.message.toLowerCase().includes("schema cache") ||
+          catRes.error.message.toLowerCase().includes("relation") ||
+          catRes.error.message.toLowerCase().includes("does not exist")),
+      );
+      const isItemTableMissing = Boolean(
+        itemRes.error &&
+        (itemRes.error.code === "PGRST205" ||
+          itemRes.error.message.toLowerCase().includes("not find") ||
+          itemRes.error.message.toLowerCase().includes("schema cache") ||
+          itemRes.error.message.toLowerCase().includes("relation") ||
+          itemRes.error.message.toLowerCase().includes("does not exist")),
+      );
+
+      if (isCatTableMissing || isItemTableMissing) {
+        const missing: string[] = [];
+        if (isCatTableMissing) missing.push("'categories'");
+        if (isItemTableMissing) missing.push("'menu_items'");
         setDbTableError(
-          "Supabase tables ('categories' or 'menu_items') are not set up yet in your database.",
+          `Supabase table ${missing.join(" and ")} is not created in your database yet. Copy and run the SQL below in your Supabase SQL Editor.`,
         );
       }
 
@@ -309,14 +326,21 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           if (loadedItems.length === 0) loadedItems = defaultItems;
         }
       } else if (catRes.error || itemRes.error) {
-        // Fallback to local snapshot first if database tables are not available
+        // Fallback to local snapshot or defaults for whichever table errored
         const cached = getLocalMenuSnapshot();
-        if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-          loadedCategories = cached.categories;
-          loadedItems = cached.items || [];
-        } else {
-          if (loadedCategories.length === 0) loadedCategories = defaultCategories;
-          if (loadedItems.length === 0) loadedItems = defaultItems;
+        if (catRes.error) {
+          if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+            loadedCategories = cached.categories;
+          } else {
+            loadedCategories = defaultCategories;
+          }
+        }
+        if (itemRes.error) {
+          if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+            loadedItems = cached.items;
+          } else {
+            loadedItems = defaultItems;
+          }
         }
       }
 
@@ -382,10 +406,15 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           if (isSupabaseConfigured) {
             for (const item of updatedItems.filter((i) => !i.deleted_at)) {
               if (item.id && isUUIDFormat(item.id)) {
-                const catIdToUse = isUUIDFormat(item.category_id) ? item.category_id : null;
+                const payload: { sort_order: number; category_id?: string | null } = {
+                  sort_order: item.sort_order,
+                };
+                if (!isCatTableMissing) {
+                  payload.category_id = isUUIDFormat(item.category_id) ? item.category_id : null;
+                }
                 supabase
                   .from("menu_items")
-                  .update({ category_id: catIdToUse, sort_order: item.sort_order })
+                  .update(payload)
                   .eq("id", item.id)
                   .then(() => {})
                   .catch((e) => console.warn("Auto-sync item distribution error:", e));

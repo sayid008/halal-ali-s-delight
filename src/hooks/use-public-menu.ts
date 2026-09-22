@@ -184,6 +184,25 @@ export function usePublicMenu() {
           setSections(grouped);
           setLoading(false);
           return;
+        } else if (dbItems.length > 0) {
+          // If categories table is missing in Supabase, pair the database items with snapshot/default categories
+          const localSnapshot = getLocalMenuSnapshot();
+          const fallbackCats: DatabaseCategory[] =
+            localSnapshot &&
+            Array.isArray(localSnapshot.categories) &&
+            localSnapshot.categories.length > 0
+              ? localSnapshot.categories
+              : staticSections.map((sec, idx) => ({
+                  id: `cat-${sec.id}`,
+                  name: sec.title,
+                  slug: sec.id,
+                  sort_order: idx + 1,
+                  created_at: new Date().toISOString(),
+                }));
+          const grouped = buildSectionsFromData(fallbackCats, dbItems);
+          setSections(grouped);
+          setLoading(false);
+          return;
         }
       } catch (err) {
         console.warn("Error fetching menu from Supabase, checking local cache:", err);

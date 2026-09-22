@@ -41,9 +41,12 @@ function AdminPage() {
       // 2. If Supabase is configured with real credentials, check Supabase session
       if (isSupabaseConfigured) {
         try {
-          const { data } = await supabase.auth.getSession();
+          const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) =>
+            setTimeout(() => resolve({ data: { session: null } }), 2500),
+          );
+          const res = await Promise.race([supabase.auth.getSession(), timeoutPromise]);
           if (mounted) {
-            setSession(data.session);
+            setSession(res.data.session);
             setLoading(false);
           }
         } catch (err) {
