@@ -564,6 +564,160 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
   }
 
+  // Save Item (Add or Edit) with optimistic update + instant local sync + background DB push
+  async function handleSaveItem(data: {
+    id?: string;
+    name: string;
+    description: string | null;
+    price: number;
+    category_id: string | null;
+    image_url: string | null;
+    available: boolean;
+    sort_order: number;
+  }) {
+    const isEditing = Boolean(data.id);
+    const itemId = data.id || `dish_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const now = new Date().toISOString();
+
+    const updatedItem: DatabaseMenuItem = {
+      id: itemId,
+      name: data.name,
+      description: data.description,
+      price: data.price,
+      category_id: data.category_id,
+      image_url: data.image_url,
+      available: data.available,
+      sort_order: data.sort_order || (items.length + 1) * 10,
+      created_at: now,
+      deleted_at: null,
+    };
+
+    let newItems: DatabaseMenuItem[];
+    if (isEditing) {
+      newItems = items.map((i) => (i.id === data.id ? { ...i, ...updatedItem } : i));
+    } else {
+      newItems = [updatedItem, ...items];
+    }
+
+    setItems(newItems);
+    saveLocalMenuSnapshot(categories, newItems);
+
+    toast.success(isEditing ? `"${data.name}" updated!` : `"${data.name}" added to menu!`);
+
+    // Sync to Supabase in the background
+    try {
+      const isUUIDFormat = (str?: string | null): boolean =>
+        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
+      let dbCategoryId = data.category_id;
+      if (dbCategoryId && !isUUIDFormat(dbCategoryId)) {
+        const matched = categories.find(
+          (c) =>
+            c.id === dbCategoryId ||
+            c.slug === dbCategoryId ||
+            c.name.toLowerCase() === dbCategoryId?.toLowerCase(),
+        );
+        if (matched && isUUIDFormat(matched.id)) {
+          dbCategoryId = matched.id;
+        }
+      }
+
+      const dbPayload = {
+        name: data.name,
+        description: data.description,
+        price: data.price,
+        category_id: dbCategoryId && isUUIDFormat(dbCategoryId) ? dbCategoryId : null,
+        image_url: data.image_url,
+        available: data.available,
+        sort_order: data.sort_order,
+      };
+
+      if (isEditing && data.id && isUUIDFormat(data.id)) {
+        await supabase.from("menu_items").update(dbPayload).eq("id", data.id);
+      } else {
+        const { data: inserted } = await supabase
+          .from("menu_items")
+          .insert(dbPayload)
+          .select()
+          .single();
+        if (inserted?.id) {
+          const finalItems = newItems.map((i) => (i.id === itemId ? { ...i, id: inserted.id } : i));
+          setItems(finalItems);
+          saveLocalMenuSnapshot(categories, finalItems);
+        }
+      }
+    } catch (dbErr) {
+      console.warn("Could not sync item to Supabase:", dbErr);
+    }
+  }
+
+  // Save Category (Add or Edit)
+  async function handleSaveCategory(data: {
+    id?: string;
+    name: string;
+    slug: string;
+    sort_order: number;
+    available: boolean;
+  }) {
+    const isEditing = Boolean(data.id);
+    const catId = data.id || `cat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const now = new Date().toISOString();
+
+    const updatedCat: DatabaseCategory = {
+      id: catId,
+      name: data.name,
+      slug: data.slug,
+      sort_order: data.sort_order || (categories.length + 1) * 10,
+      available: data.available,
+      created_at: now,
+      deleted_at: null,
+    };
+
+    let newCats: DatabaseCategory[];
+    if (isEditing) {
+      newCats = categories.map((c) => (c.id === data.id ? { ...c, ...updatedCat } : c));
+    } else {
+      newCats = [...categories, updatedCat];
+    }
+
+    setCategories(newCats);
+    saveLocalMenuSnapshot(newCats, items);
+
+    toast.success(
+      isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
+    );
+
+    // Sync to Supabase in the background
+    try {
+      const isUUIDFormat = (str?: string | null): boolean =>
+        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
+      const dbPayload = {
+        name: data.name,
+        slug: data.slug,
+        sort_order: data.sort_order,
+        available: data.available,
+      };
+
+      if (isEditing && data.id && isUUIDFormat(data.id)) {
+        await supabase.from("categories").update(dbPayload).eq("id", data.id);
+      } else {
+        const { data: inserted } = await supabase
+          .from("categories")
+          .insert(dbPayload)
+          .select()
+          .single();
+        if (inserted?.id) {
+          const finalCats = newCats.map((c) => (c.id === catId ? { ...c, id: inserted.id } : c));
+          setCategories(finalCats);
+          saveLocalMenuSnapshot(finalCats, items);
+        }
+      }
+    } catch (dbErr) {
+      console.warn("Could not sync category to Supabase:", dbErr);
+    }
+  }
+
   // Filtered menu items, ordered by sort_order
   const filteredItems = useMemo(() => {
     const list = activeItems.filter((item) => {
@@ -1621,7 +1775,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         item={editingItem}
         categories={activeCategories}
         defaultCategoryId={selectedCategory !== "all" ? selectedCategory : undefined}
-        onSaved={loadData}
+        onSave={handleSaveItem}
       />
 
       {/* Category Dialog */}
@@ -1629,7 +1783,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         open={categoryDialogOpen}
         onOpenChange={setCategoryDialogOpen}
         category={editingCategory}
-        onSaved={loadData}
+        onSave={handleSaveCategory}
       />
     </div>
   );

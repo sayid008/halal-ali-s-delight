@@ -21,10 +21,16 @@ interface CategoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   category: DatabaseCategory | null;
-  onSaved: () => void;
+  onSave: (data: {
+    id?: string;
+    name: string;
+    slug: string;
+    sort_order: number;
+    available: boolean;
+  }) => Promise<void>;
 }
 
-export function CategoryDialog({ open, onOpenChange, category, onSaved }: CategoryDialogProps) {
+export function CategoryDialog({ open, onOpenChange, category, onSave }: CategoryDialogProps) {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [sortOrder, setSortOrder] = useState(0);
@@ -68,42 +74,18 @@ export function CategoryDialog({ open, onOpenChange, category, onSaved }: Catego
 
     setSaving(true);
     try {
-      const payload = {
+      await onSave({
+        id: category?.id,
         name: name.trim(),
         slug: slug.trim(),
         sort_order: Number(sortOrder),
         available: available,
-      };
+      });
 
-      if (category) {
-        if (isUUID(category.id)) {
-          const { error } = await supabase.from("categories").update(payload).eq("id", category.id);
-
-          if (error) throw error;
-        } else {
-          // If fallback/static ID, try updating by slug or insert
-          const { error: updateError } = await supabase
-            .from("categories")
-            .update(payload)
-            .eq("slug", category.slug);
-
-          if (updateError) {
-            const { error: insertError } = await supabase.from("categories").insert(payload);
-            if (insertError) throw insertError;
-          }
-        }
-        toast.success(`Category "${name}" updated!`);
-      } else {
-        const { error } = await supabase.from("categories").insert(payload);
-        if (error) throw error;
-        toast.success(`Category "${name}" created!`);
-      }
-
-      onSaved();
       onOpenChange(false);
     } catch (err: unknown) {
       console.error("Error saving category:", err);
-      let message = "Failed to save category in database";
+      let message = "Failed to save category";
       if (err && typeof err === "object") {
         const anyErr = err as { message?: string; details?: string; hint?: string };
         message = anyErr.message || anyErr.details || message;

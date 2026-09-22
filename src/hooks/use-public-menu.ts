@@ -24,18 +24,46 @@ function buildSectionsFromData(
     (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
   );
 
-  const grouped: MenuSectionWithItems[] = sortedCategories
-    .map((cat) => {
-      const categoryItems = items
-        .filter(
-          (item) =>
-            item.category_id === cat.id ||
-            item.category_id === cat.slug ||
-            (cat.slug && item.category_id?.includes(cat.slug)) ||
-            (cat.name && item.category_id?.toLowerCase() === cat.name.toLowerCase()),
-        )
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map((item) => ({
+  const matchedItemIds = new Set<string>();
+
+  const grouped: MenuSectionWithItems[] = sortedCategories.map((cat) => {
+    const categoryItems = items
+      .filter((item) => {
+        const matches =
+          item.category_id === cat.id ||
+          item.category_id === cat.slug ||
+          (cat.slug && item.category_id?.includes(cat.slug)) ||
+          (cat.name && item.category_id?.toLowerCase() === cat.name.toLowerCase());
+        if (matches) {
+          matchedItemIds.add(item.id);
+        }
+        return matches;
+      })
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description ?? "",
+        price: Number(item.price),
+        image_url: item.image_url,
+        available: item.available !== false,
+        sort_order: item.sort_order ?? 0,
+      }));
+
+    return {
+      id: cat.slug || cat.id,
+      title: cat.name,
+      items: categoryItems,
+    };
+  });
+
+  // Check for any leftover active items that weren't assigned to any category
+  const unmatchedItems = items.filter((item) => !matchedItemIds.has(item.id));
+  if (unmatchedItems.length > 0) {
+    if (grouped.length > 0) {
+      // Put in first category
+      unmatchedItems.forEach((item) => {
+        grouped[0].items.push({
           id: item.id,
           name: item.name,
           description: item.description ?? "",
@@ -43,22 +71,58 @@ function buildSectionsFromData(
           image_url: item.image_url,
           available: item.available !== false,
           sort_order: item.sort_order ?? 0,
-        }));
+        });
+      });
+    } else {
+      // Create a default section
+      grouped.push({
+        id: "menu-items",
+        title: "Our Specialities",
+        items: unmatchedItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          description: item.description ?? "",
+          price: Number(item.price),
+          image_url: item.image_url,
+          available: item.available !== false,
+          sort_order: item.sort_order ?? 0,
+        })),
+      });
+    }
+  }
 
-      return {
-        id: cat.slug || cat.id,
-        title: cat.name,
-        items: categoryItems,
-      };
-    })
-    .filter((sec) => sec.items.length > 0);
+  // Filter out sections that have 0 items
+  return grouped.filter((sec) => sec.items.length > 0);
+}
 
-  return grouped;
+function getInitialSections(): MenuSectionWithItems[] {
+  const localSnapshot = getLocalMenuSnapshot();
+  if (localSnapshot && localSnapshot.categories.length > 0 && localSnapshot.items.length > 0) {
+    const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items);
+    if (grouped.length > 0) {
+      return grouped;
+    }
+  }
+
+  const orderedStatic = applyOrderToStaticSections(staticSections);
+  return orderedStatic.map((sec, secIdx) => ({
+    id: sec.id,
+    title: sec.title,
+    items: sec.items.map((item, itemIdx) => ({
+      id: `static-${sec.id}-${itemIdx}`,
+      name: item.name,
+      description: item.description,
+      price: typeof item.price === "number" ? item.price : 250,
+      image_url: item.image ?? null,
+      available: true,
+      sort_order: (secIdx + 1) * 100 + (itemIdx + 1),
+    })),
+  }));
 }
 
 export function usePublicMenu() {
-  const [sections, setSections] = useState<MenuSectionWithItems[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sections, setSections] = useState<MenuSectionWithItems[]>(getInitialSections);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {

@@ -31,7 +31,16 @@ interface MenuItemDialogProps {
   item: DatabaseMenuItem | null;
   categories: DatabaseCategory[];
   defaultCategoryId?: string;
-  onSaved: () => void;
+  onSave: (data: {
+    id?: string;
+    name: string;
+    description: string | null;
+    price: number;
+    category_id: string | null;
+    image_url: string | null;
+    available: boolean;
+    sort_order: number;
+  }) => Promise<void>;
 }
 
 export function MenuItemDialog({
@@ -40,7 +49,7 @@ export function MenuItemDialog({
   item,
   categories,
   defaultCategoryId,
-  onSaved,
+  onSave,
 }: MenuItemDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -110,81 +119,21 @@ export function MenuItemDialog({
 
     setSaving(true);
     try {
-      // Resolve category UUID safely
-      let resolvedCategoryId: string | null = null;
-      if (isUUID(categoryId)) {
-        resolvedCategoryId = categoryId;
-      } else if (categoryId) {
-        // Look up by id, slug or name in existing categories
-        const matchedCat = categories.find(
-          (c) =>
-            c.id === categoryId ||
-            c.slug === categoryId ||
-            c.name.toLowerCase() === categoryId.toLowerCase(),
-        );
-        if (matchedCat) {
-          if (isUUID(matchedCat.id)) {
-            resolvedCategoryId = matchedCat.id;
-          } else {
-            // Attempt to insert category into DB to obtain real UUID
-            try {
-              const { data: newCat } = await supabase
-                .from("categories")
-                .insert({
-                  name: matchedCat.name,
-                  slug: matchedCat.slug,
-                  sort_order: matchedCat.sort_order ?? 0,
-                  available: true,
-                })
-                .select()
-                .single();
-              if (newCat?.id && isUUID(newCat.id)) {
-                resolvedCategoryId = newCat.id;
-              }
-            } catch (catErr) {
-              console.warn("Could not create category record:", catErr);
-            }
-          }
-        }
-      }
-
-      const payload = {
+      await onSave({
+        id: item?.id,
         name: name.trim(),
         description: description.trim() || null,
         price: numPrice,
-        category_id: resolvedCategoryId,
+        category_id: categoryId || null,
         image_url: imageUrl.trim() || null,
         available: available,
         sort_order: item?.sort_order ?? 0,
-      };
+      });
 
-      if (item) {
-        if (isUUID(item.id)) {
-          const { error } = await supabase.from("menu_items").update(payload).eq("id", item.id);
-          if (error) throw error;
-        } else {
-          // If it was a static or mock ID, attempt to insert or update existing record by name
-          const { error: insertError } = await supabase.from("menu_items").insert(payload);
-          if (insertError) {
-            const { error: updateError } = await supabase
-              .from("menu_items")
-              .update(payload)
-              .eq("name", item.name);
-            if (updateError) throw updateError;
-          }
-        }
-        toast.success(`"${name}" updated in menu!`);
-      } else {
-        const { error } = await supabase.from("menu_items").insert(payload);
-        if (error) throw error;
-        toast.success(`"${name}" added to menu!`);
-      }
-
-      onSaved();
       onOpenChange(false);
     } catch (err: unknown) {
       console.error("Error saving dish:", err);
-      let message = "Failed to save dish in database";
+      let message = "Failed to save dish";
       if (err && typeof err === "object") {
         const anyErr = err as { message?: string; details?: string; hint?: string };
         message = anyErr.message || anyErr.details || message;
