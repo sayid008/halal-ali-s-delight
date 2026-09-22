@@ -79,17 +79,8 @@ function buildSectionsFromData(
 }
 
 function getInitialSections(): MenuSectionWithItems[] {
-  const localSnapshot = getLocalMenuSnapshot();
-  if (
-    localSnapshot &&
-    Array.isArray(localSnapshot.categories) &&
-    localSnapshot.categories.length > 0
-  ) {
-    return buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
-  }
-
-  const orderedStatic = applyOrderToStaticSections(staticSections);
-  return orderedStatic.map((sec, secIdx) => ({
+  // Always initialize with raw static sections for identical SSR & client hydration
+  return staticSections.map((sec, secIdx) => ({
     id: sec.id,
     title: sec.title,
     items: sec.items.map((item, itemIdx) => ({
