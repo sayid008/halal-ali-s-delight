@@ -14,6 +14,9 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
+const isUUID = (str?: string | null): boolean =>
+  Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
 interface CategoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -65,40 +68,33 @@ export function CategoryDialog({ open, onOpenChange, category, onSaved }: Catego
 
     setSaving(true);
     try {
+      const payload = {
+        name: name.trim(),
+        slug: slug.trim(),
+        sort_order: Number(sortOrder),
+        available: available,
+      };
+
       if (category) {
-        if (category.id.startsWith("cat-")) {
-          const { error } = await supabase.from("categories").upsert(
-            {
-              name: name.trim(),
-              slug: slug.trim(),
-              sort_order: Number(sortOrder),
-              available: available,
-            },
-            { onConflict: "slug" },
-          );
-          if (error) throw error;
-        } else {
-          const { error } = await supabase
-            .from("categories")
-            .update({
-              name: name.trim(),
-              slug: slug.trim(),
-              sort_order: Number(sortOrder),
-              available: available,
-            })
-            .eq("id", category.id);
+        if (isUUID(category.id)) {
+          const { error } = await supabase.from("categories").update(payload).eq("id", category.id);
 
           if (error) throw error;
+        } else {
+          // If fallback/static ID, try updating by slug or insert
+          const { error: updateError } = await supabase
+            .from("categories")
+            .update(payload)
+            .eq("slug", category.slug);
+
+          if (updateError) {
+            const { error: insertError } = await supabase.from("categories").insert(payload);
+            if (insertError) throw insertError;
+          }
         }
         toast.success(`Category "${name}" updated!`);
       } else {
-        const { error } = await supabase.from("categories").insert({
-          name: name.trim(),
-          slug: slug.trim(),
-          sort_order: Number(sortOrder),
-          available: available,
-        });
-
+        const { error } = await supabase.from("categories").insert(payload);
         if (error) throw error;
         toast.success(`Category "${name}" created!`);
       }
@@ -107,7 +103,13 @@ export function CategoryDialog({ open, onOpenChange, category, onSaved }: Catego
       onOpenChange(false);
     } catch (err: unknown) {
       console.error("Error saving category:", err);
-      const message = err instanceof Error ? err.message : "Failed to save category";
+      let message = "Failed to save category in database";
+      if (err && typeof err === "object") {
+        const anyErr = err as { message?: string; details?: string; hint?: string };
+        message = anyErr.message || anyErr.details || message;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
       toast.error(message);
     } finally {
       setSaving(false);

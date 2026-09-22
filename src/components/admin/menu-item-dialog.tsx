@@ -22,6 +22,9 @@ import {
 import { Loader2, Upload, Image as ImageIcon, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
+const isUUID = (str?: string | null): boolean =>
+  Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
 interface MenuItemDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,6 +43,7 @@ export function MenuItemDialog({
   onSaved,
 }: MenuItemDialogProps) {
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [price, setPrice] = useState<string>("250");
   const [categoryId, setCategoryId] = useState<string>("");
   const [imageUrl, setImageUrl] = useState<string>("");
@@ -51,13 +55,15 @@ export function MenuItemDialog({
 
   useEffect(() => {
     if (item) {
-      setName(item.name);
-      setPrice(String(item.price));
+      setName(item.name || "");
+      setDescription(item.description || "");
+      setPrice(String(item.price ?? "250"));
       setCategoryId(item.category_id ?? (categories[0]?.id || ""));
       setImageUrl(item.image_url ?? "");
       setAvailable(item.available !== false);
     } else {
       setName("");
+      setDescription("");
       setPrice("250");
       setCategoryId(defaultCategoryId || categories[0]?.id || "");
       setImageUrl("");
@@ -104,32 +110,51 @@ export function MenuItemDialog({
 
     setSaving(true);
     try {
+      // Resolve category UUID safely
+      let resolvedCategoryId: string | null = null;
+      if (isUUID(categoryId)) {
+        resolvedCategoryId = categoryId;
+      } else if (categoryId) {
+        // Look up by id, slug or name in existing categories
+        const matchedCat = categories.find(
+          (c) =>
+            c.id === categoryId ||
+            c.slug === categoryId ||
+            c.name.toLowerCase() === categoryId.toLowerCase(),
+        );
+        if (matchedCat && isUUID(matchedCat.id)) {
+          resolvedCategoryId = matchedCat.id;
+        }
+      }
+
       const payload = {
         name: name.trim(),
-        description: item?.description ?? null,
+        description: description.trim() || null,
         price: numPrice,
-        category_id: categoryId || null,
+        category_id: resolvedCategoryId,
         image_url: imageUrl.trim() || null,
         available: available,
         sort_order: item?.sort_order ?? 0,
       };
 
       if (item) {
-        if (item.id.startsWith("dish-")) {
-          // If it was a mock ID, insert it as a real database row
-          const { error } = await supabase.from("menu_items").insert(payload);
-          if (error) {
-            // Try updating if already exists by name
-            await supabase.from("menu_items").update(payload).eq("name", item.name);
-          }
-        } else {
+        if (isUUID(item.id)) {
           const { error } = await supabase.from("menu_items").update(payload).eq("id", item.id);
           if (error) throw error;
+        } else {
+          // If it was a static or mock ID, attempt to insert or update existing record by name
+          const { error: insertError } = await supabase.from("menu_items").insert(payload);
+          if (insertError) {
+            const { error: updateError } = await supabase
+              .from("menu_items")
+              .update(payload)
+              .eq("name", item.name);
+            if (updateError) throw updateError;
+          }
         }
         toast.success(`"${name}" updated in menu!`);
       } else {
         const { error } = await supabase.from("menu_items").insert(payload);
-
         if (error) throw error;
         toast.success(`"${name}" added to menu!`);
       }
@@ -138,7 +163,13 @@ export function MenuItemDialog({
       onOpenChange(false);
     } catch (err: unknown) {
       console.error("Error saving dish:", err);
-      const message = err instanceof Error ? err.message : "Failed to save dish in database";
+      let message = "Failed to save dish in database";
+      if (err && typeof err === "object") {
+        const anyErr = err as { message?: string; details?: string; hint?: string };
+        message = anyErr.message || anyErr.details || message;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
       toast.error(message);
     } finally {
       setSaving(false);
@@ -165,6 +196,17 @@ export function MenuItemDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Royal Lamb Biryani"
               required
+            />
+          </div>
+
+          {/* Dish Description */}
+          <div className="space-y-1.5">
+            <Label htmlFor="dish-description">Description / Ingredients (Optional)</Label>
+            <Input
+              id="dish-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. Tender lamb slow-cooked with aromatic saffron basmati rice"
             />
           </div>
 
