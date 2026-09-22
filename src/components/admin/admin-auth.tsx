@@ -18,7 +18,7 @@ interface AdminAuthProps {
 }
 
 export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
-  const [email, setEmail] = useState("admin@halal-ali.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -97,13 +97,6 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
                 <Label htmlFor="email" className="text-xs font-medium">
                   Email Address
                 </Label>
-                <button
-                  type="button"
-                  onClick={() => setEmail("admin@halal-ali.com")}
-                  className="text-[11px] text-muted-foreground hover:text-primary transition-colors underline"
-                >
-                  Use Admin Email
-                </button>
               </div>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
