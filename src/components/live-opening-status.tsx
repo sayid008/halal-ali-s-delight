@@ -5,8 +5,10 @@ import { Clock, ChevronRight } from "lucide-react";
 
 export function LiveOpeningStatus() {
   const [status, setStatus] = useState<RestaurantStatus | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     setStatus(getRestaurantStatus());
     const interval = setInterval(() => {
       setStatus(getRestaurantStatus());
@@ -14,8 +16,8 @@ export function LiveOpeningStatus() {
     return () => clearInterval(interval);
   }, []);
 
-  const isOpen = status ? status.isOpen : true;
-  const statusText = status ? status.statusText : "Open Daily";
+  const isOpen = mounted && status ? status.isOpen : false;
+  const statusText = mounted && status ? status.statusText : "Opening Hours";
   const openTime = status ? status.todaySchedule.openTime : "12:00 PM";
   const closeTime = status ? status.todaySchedule.closeTime : "11:00 PM";
 

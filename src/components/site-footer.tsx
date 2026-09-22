@@ -1,8 +1,21 @@
+import { useState, useEffect } from "react";
 import { restaurant } from "@/data/menu";
 import { getRestaurantStatus } from "@/lib/opening-hours";
 
 export function SiteFooter() {
-  const status = getRestaurantStatus();
+  const [status, setStatus] = useState(() => getRestaurantStatus());
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setStatus(getRestaurantStatus());
+    const interval = setInterval(() => {
+      setStatus(getRestaurantStatus());
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isOpen = mounted ? status.isOpen : false;
 
   return (
     <footer className="border-t border-border bg-primary px-6 py-12 text-primary-foreground">
@@ -26,15 +39,15 @@ export function SiteFooter() {
               <p className="text-xs uppercase tracking-widest opacity-60">Hours</p>
               <span
                 className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  status.isOpen ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-white/70"
+                  isOpen ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-white/70"
                 }`}
               >
                 <span
                   className={`size-1.5 rounded-full ${
-                    status.isOpen ? "bg-emerald-400 animate-pulse" : "bg-white/40"
+                    isOpen ? "bg-emerald-400 animate-pulse" : "bg-white/40"
                   }`}
                 />
-                {status.isOpen ? "Open Now" : "Closed"}
+                {isOpen ? "Open Now" : "Closed"}
               </span>
             </div>
             <p>{restaurant.hours}</p>

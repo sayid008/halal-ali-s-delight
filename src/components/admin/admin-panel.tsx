@@ -1386,27 +1386,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               <span className="hidden xs:inline">Refresh</span>
             </Button>
 
-            {(activeTab === "items" || activeTab === "categories") && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDistributeAcrossCategories}
-                disabled={distributing}
-                className="h-8 gap-1.5 border-gold/40 hover:bg-gold/10 text-xs font-medium shrink-0"
-                title="Distribute dishes across all categories except Shop and save to database"
-              >
-                {distributing ? (
-                  <Loader2 className="size-3.5 animate-spin text-gold" />
-                ) : (
-                  <Layers className="size-3.5 text-gold" />
-                )}
-                <span>Distribute Across Categories</span>
-                <span className="hidden sm:inline-block rounded bg-gold/15 px-1 py-0.2 text-[9px] font-semibold text-gold uppercase tracking-wider">
-                  No Shop
-                </span>
-              </Button>
-            )}
-
             {activeTab === "items" && (
               <Button
                 size="sm"
