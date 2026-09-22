@@ -168,7 +168,20 @@ export function usePublicMenu() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {
-    // 1. Try fetching from live Supabase database
+    // 1. Check Local Storage Admin snapshot first so admin changes reflect instantly on homepage
+    const localSnapshot = getLocalMenuSnapshot();
+    if (
+      localSnapshot &&
+      Array.isArray(localSnapshot.categories) &&
+      localSnapshot.categories.length > 0
+    ) {
+      const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
+      setSections(grouped);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Try fetching from live Supabase database if no local snapshot exists
     if (isSupabaseConfigured) {
       try {
         const [catRes, itemRes] = await Promise.all([
@@ -185,41 +198,21 @@ export function usePublicMenu() {
           setLoading(false);
           return;
         } else if (dbItems.length > 0) {
-          // If categories table is missing in Supabase, pair the database items with snapshot/default categories
-          const localSnapshot = getLocalMenuSnapshot();
-          const fallbackCats: DatabaseCategory[] =
-            localSnapshot &&
-            Array.isArray(localSnapshot.categories) &&
-            localSnapshot.categories.length > 0
-              ? localSnapshot.categories
-              : staticSections.map((sec, idx) => ({
-                  id: `cat-${sec.id}`,
-                  name: sec.title,
-                  slug: sec.id,
-                  sort_order: idx + 1,
-                  created_at: new Date().toISOString(),
-                }));
+          const fallbackCats: DatabaseCategory[] = staticSections.map((sec, idx) => ({
+            id: `cat-${sec.id}`,
+            name: sec.title,
+            slug: sec.id,
+            sort_order: idx + 1,
+            created_at: new Date().toISOString(),
+          }));
           const grouped = buildSectionsFromData(fallbackCats, dbItems);
           setSections(grouped);
           setLoading(false);
           return;
         }
       } catch (err) {
-        console.warn("Error fetching menu from Supabase, checking local cache:", err);
+        console.warn("Error fetching menu from Supabase:", err);
       }
-    }
-
-    // 2. Fallback to Local Storage Admin snapshot if available
-    const localSnapshot = getLocalMenuSnapshot();
-    if (
-      localSnapshot &&
-      Array.isArray(localSnapshot.categories) &&
-      localSnapshot.categories.length > 0
-    ) {
-      const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
-      setSections(grouped);
-      setLoading(false);
-      return;
     }
 
     // 3. Final fallback to ordered static sections
