@@ -42,8 +42,6 @@ import {
   AlertCircle,
   Copy,
   Check,
-  Eye,
-  EyeOff,
   Loader2,
   Sparkles,
 } from "lucide-react";
@@ -1239,22 +1237,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           </div>
         </div>
 
-        {/* Order Guide Banner */}
-        {(activeTab === "items" || activeTab === "categories") && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-gold/30 bg-gold/5 px-3 py-2 text-xs text-foreground">
-            <span className="flex size-4 shrink-0 items-center justify-center rounded bg-gold/20 font-mono text-[10px] font-bold text-gold">
-              ↑↓
-            </span>
-            <p className="text-muted-foreground text-[11px] leading-normal">
-              <strong className="font-semibold text-foreground">Sort Order:</strong> Tap{" "}
-              <strong className="text-foreground">▲</strong> (Up) or{" "}
-              <strong className="text-foreground">▼</strong> (Down) next to any{" "}
-              {activeTab === "items" ? "dish" : "category"} to adjust its menu order. Order updates
-              are saved automatically.
-            </p>
-          </div>
-        )}
-
         {/* TAB 1: MENU ITEMS */}
         {activeTab === "items" && (
           <div className="space-y-4">
@@ -1396,12 +1378,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                             >
                               {item.available !== false ? (
                                 <>
-                                  <Eye className="size-2.5 text-emerald-500" />
+                                  <span className="size-1.5 rounded-full bg-emerald-500" />
                                   <span>Active</span>
                                 </>
                               ) : (
                                 <>
-                                  <EyeOff className="size-2.5 text-muted-foreground" />
+                                  <span className="size-1.5 rounded-full bg-muted-foreground/60" />
                                   <span>Inactive</span>
                                 </>
                               )}
@@ -1545,12 +1527,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                               >
                                 {item.available !== false ? (
                                   <>
-                                    <Eye className="size-3 text-emerald-500" />
+                                    <span className="size-1.5 rounded-full bg-emerald-500" />
                                     <span>Active</span>
                                   </>
                                 ) : (
                                   <>
-                                    <EyeOff className="size-3 text-muted-foreground" />
+                                    <span className="size-1.5 rounded-full bg-muted-foreground/60" />
                                     <span>Inactive</span>
                                   </>
                                 )}
@@ -1699,12 +1681,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                               >
                                 {cat.available !== false ? (
                                   <>
-                                    <Eye className="size-2.5 text-emerald-500" />
+                                    <span className="size-1.5 rounded-full bg-emerald-500" />
                                     <span>Active</span>
                                   </>
                                 ) : (
                                   <>
-                                    <EyeOff className="size-2.5 text-muted-foreground" />
+                                    <span className="size-1.5 rounded-full bg-muted-foreground/60" />
                                     <span>Inactive</span>
                                   </>
                                 )}
@@ -1841,12 +1823,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                 >
                                   {cat.available !== false ? (
                                     <>
-                                      <Eye className="size-3 text-emerald-500" />
+                                      <span className="size-1.5 rounded-full bg-emerald-500" />
                                       <span>Active</span>
                                     </>
                                   ) : (
                                     <>
-                                      <EyeOff className="size-3 text-muted-foreground" />
+                                      <span className="size-1.5 rounded-full bg-muted-foreground/60" />
                                       <span>Inactive</span>
                                     </>
                                   )}
