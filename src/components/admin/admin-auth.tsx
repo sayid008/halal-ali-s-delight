@@ -1,10 +1,5 @@
 import { useState } from "react";
-import {
-  supabase,
-  isSupabaseConfigured,
-  saveLocalAdminSession,
-  type AdminUserSession,
-} from "@/lib/supabase";
+import { supabase, isSupabaseConfigured, type AdminUserSession } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,37 +24,27 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
     setError(null);
     setLoading(true);
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (signInError) throw signInError;
+    try {
+      if (!isSupabaseConfigured) {
+        throw new Error("Supabase is not configured. Please connect Supabase to sign in.");
+      }
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) throw signInError;
 
-        toast.success("Welcome back!");
-        onAuthSuccess(data.session);
-        return;
-      } catch (err: unknown) {
-        console.error("Supabase auth error:", err);
-        const message =
-          err instanceof Error
-            ? err.message
-            : "Invalid login credentials. Please check your email and password.";
-        setError(message);
-        toast.error(message);
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      if (email === "admin@halal-ali.com" && (password === "admin123" || password === "admin")) {
-        const session = saveLocalAdminSession(email);
-        toast.success("Welcome back, Administrator!");
-        onAuthSuccess(session);
-      } else {
-        setError("Invalid credentials. Default: admin@halal-ali.com / admin123");
-        toast.error("Invalid credentials");
-      }
+      toast.success("Welcome back!");
+      onAuthSuccess(data.session);
+    } catch (err: unknown) {
+      console.error("Supabase auth error:", err);
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Invalid login credentials. Please check your email and password.";
+      setError(message);
+      toast.error(message);
+    } finally {
       setLoading(false);
     }
   }
