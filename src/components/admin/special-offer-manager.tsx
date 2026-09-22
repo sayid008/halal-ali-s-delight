@@ -273,7 +273,7 @@ export function SpecialOfferManager() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Header Info */}
       <div className="flex flex-col gap-3 rounded-xl sm:rounded-2xl border border-border bg-card p-3.5 sm:p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>

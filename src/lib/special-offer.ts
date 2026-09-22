@@ -249,11 +249,18 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
 }
 
 export function useSpecialOffer() {
-  const [offer, setOffer] = useState<SpecialOffer>(getLocalSpecialOffer);
+  // Always initialize with DEFAULT_SPECIAL_OFFER for consistent SSR and initial client hydration
+  const [offer, setOffer] = useState<SpecialOffer>(DEFAULT_SPECIAL_OFFER);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+
+    // Synchronously check local storage on mount (client-side only)
+    const local = getLocalSpecialOffer();
+    if (local && local !== DEFAULT_SPECIAL_OFFER) {
+      setOffer(local);
+    }
 
     fetchSpecialOffer().then((data) => {
       if (mounted) {

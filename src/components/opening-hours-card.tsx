@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
-import { WEEKLY_SCHEDULE, getRestaurantStatus, type RestaurantStatus } from "@/lib/opening-hours";
+import {
+  WEEKLY_SCHEDULE,
+  getRestaurantStatus,
+  DEFAULT_RESTAURANT_STATUS,
+  type RestaurantStatus,
+} from "@/lib/opening-hours";
 import { Clock, ChevronDown, ChevronUp, CalendarDays, CheckCircle2 } from "lucide-react";
 
 interface OpeningHoursCardProps {
@@ -13,10 +18,11 @@ export function OpeningHoursCard({
   className = "",
   defaultExpanded = false,
 }: OpeningHoursCardProps) {
-  const [status, setStatus] = useState<RestaurantStatus>(getRestaurantStatus);
+  const [status, setStatus] = useState<RestaurantStatus>(DEFAULT_RESTAURANT_STATUS);
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   useEffect(() => {
+    setStatus(getRestaurantStatus());
     // Update live status every 60 seconds
     const interval = setInterval(() => {
       setStatus(getRestaurantStatus());

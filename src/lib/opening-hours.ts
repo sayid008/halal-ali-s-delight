@@ -152,3 +152,11 @@ export function getRestaurantStatus(date: Date = new Date()): RestaurantStatus {
     currentDayIndex,
   };
 }
+
+export const DEFAULT_RESTAURANT_STATUS: RestaurantStatus = {
+  isOpen: true,
+  statusText: "Open Now",
+  subText: "Open daily 12:00 PM – 11:00 PM",
+  todaySchedule: WEEKLY_SCHEDULE[0],
+  currentDayIndex: 1,
+};

@@ -5,8 +5,8 @@ import { SiteFooter } from "@/components/site-footer";
 import { menuSections as staticSections, restaurant } from "@/data/menu";
 import { usePublicMenu } from "@/hooks/use-public-menu";
 import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
-import { getRestaurantStatus } from "@/lib/opening-hours";
-import { Clock, MapPin, Phone, ArrowUpRight, ChevronRight } from "lucide-react";
+import { LiveOpeningStatus } from "@/components/live-opening-status";
+import { MapPin, Phone, ArrowUpRight } from "lucide-react";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
 const description =
@@ -118,47 +118,7 @@ function Index() {
               </div>
 
               {/* Opening Hours with Live Status */}
-              {(() => {
-                const status = getRestaurantStatus();
-                return (
-                  <div className="flex items-start gap-3.5 border-t border-border pt-4 md:border-t-0 md:border-l md:pl-6 md:pt-0">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gold/15 text-gold">
-                      <Clock className="size-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          Opening Hours
-                        </p>
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            status.isOpen
-                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                              : "bg-muted text-muted-foreground"
-                          }`}
-                        >
-                          <span
-                            className={`size-1.5 rounded-full ${
-                              status.isOpen ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"
-                            }`}
-                          />
-                          {status.statusText}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-sm font-medium text-foreground">
-                        Today: {status.todaySchedule.openTime} – {status.todaySchedule.closeTime}
-                      </p>
-                      <Link
-                        to="/contact"
-                        className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-gold hover:underline"
-                      >
-                        <span>View weekly schedule</span>
-                        <ChevronRight className="size-3" />
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })()}
+              <LiveOpeningStatus />
 
               {/* Phone / Call to Order */}
               <div className="flex items-start gap-3.5 border-t border-border pt-4 md:border-t-0 md:border-l md:pl-6 md:pt-0">
