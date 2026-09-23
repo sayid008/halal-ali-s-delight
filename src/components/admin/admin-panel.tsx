@@ -1913,7 +1913,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         onOpenChange={setItemDialogOpen}
         item={editingItem}
         categories={activeCategories}
-        defaultCategoryId={selectedCategory !== "all" ? selectedCategory : undefined}
         onSave={handleSaveItem}
       />
 

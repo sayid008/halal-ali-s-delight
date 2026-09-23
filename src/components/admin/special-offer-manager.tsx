@@ -4,6 +4,7 @@ import {
   type SpecialOfferSlide,
   DEFAULT_SPECIAL_OFFER,
   DEFAULT_SLIDES,
+  getLocalSpecialOffer,
   fetchSpecialOffer,
   saveSpecialOffer,
   getOfferSlides,
