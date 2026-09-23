@@ -1,4 +1,3 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -69,26 +68,6 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
               <h2 id="home-menu-heading" className="font-serif text-2xl sm:text-3xl">
                 Menu
               </h2>
-              <div className="hidden gap-2 sm:flex">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label="Scroll categories left"
-                  onClick={() => scrollCategories(-1)}
-                >
-                  <ChevronLeft aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label="Scroll categories right"
-                  onClick={() => scrollCategories(1)}
-                >
-                  <ChevronRight aria-hidden="true" />
-                </Button>
-              </div>
             </div>
 
             <div
