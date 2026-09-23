@@ -162,8 +162,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const [dbTableError, setDbTableError] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
 
-  async function loadData() {
-    if (items.length === 0 || categories.length === 0) {
+  async function loadData(showLoader = false) {
+    if (showLoader || (!hasInitialLoaded && items.length === 0)) {
       setLoading(true);
     }
     setDbTableError(null);
@@ -310,6 +310,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       setHasInitialLoaded(true);
     } finally {
       setLoading(false);
+      setHasInitialLoaded(true);
     }
   }
 
@@ -319,6 +320,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const handleLocalUpdate = (e?: Event) => {
       if (e && "detail" in e && e.detail) {
         const detail = (e as CustomEvent).detail as {
+          type?: string;
           categories?: DatabaseCategory[];
           items?: DatabaseMenuItem[];
         };
@@ -328,13 +330,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         if (detail.items && Array.isArray(detail.items)) {
           setItems(detail.items);
         }
+        if (detail.type === "snapshot") {
+          return;
+        }
       }
-      loadData();
+      loadData(false);
     };
 
     const handleVisibilityChange = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        loadData();
+        loadData(false);
       }
     };
 
@@ -357,7 +362,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               setItems(msgEvent.data.items);
             }
           }
-          loadData();
         };
       } catch {
         // ignore channel errors
@@ -370,10 +374,10 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         realtimeChannel = supabase
           .channel("admin-menu-realtime")
           .on("postgres_changes", { event: "*", schema: "public", table: "menu_categories" }, () =>
-            loadData(),
+            loadData(false),
           )
           .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>
-            loadData(),
+            loadData(false),
           )
           .subscribe();
       } catch (err) {
