@@ -403,6 +403,53 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   useEffect(() => {
     loadData();
+
+    const handleLocalUpdate = () => {
+      loadData();
+    };
+
+    window.addEventListener(MENU_ORDER_EVENT, handleLocalUpdate);
+    window.addEventListener("storage", handleLocalUpdate);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        bc = new BroadcastChannel("halal_ali_menu_channel");
+        bc.onmessage = () => {
+          loadData();
+        };
+      } catch {
+        // ignore channel errors
+      }
+    }
+
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    if (isSupabaseConfigured) {
+      try {
+        realtimeChannel = supabase
+          .channel("admin-menu-realtime")
+          .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () =>
+            loadData(),
+          )
+          .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>
+            loadData(),
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn("Could not subscribe AdminPanel to Supabase Realtime:", err);
+      }
+    }
+
+    return () => {
+      window.removeEventListener(MENU_ORDER_EVENT, handleLocalUpdate);
+      window.removeEventListener("storage", handleLocalUpdate);
+      if (bc) {
+        bc.close();
+      }
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+      }
+    };
   }, []);
 
   // Separate Active vs Trashed items

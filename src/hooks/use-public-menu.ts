@@ -129,20 +129,7 @@ export function usePublicMenu() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {
-    // 1. Check Local Storage Admin snapshot first so admin changes reflect instantly on homepage
-    const localSnapshot = getLocalMenuSnapshot();
-    if (
-      localSnapshot &&
-      Array.isArray(localSnapshot.categories) &&
-      localSnapshot.categories.length > 0
-    ) {
-      const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
-      setSections(grouped);
-      setLoading(false);
-      return;
-    }
-
-    // 2. Try fetching from live Supabase database if no local snapshot exists
+    // 1. Try fetching from live Supabase database first so all users see database changes immediately
     if (isSupabaseConfigured) {
       try {
         const [catRes, itemRes] = await Promise.all([
@@ -156,6 +143,7 @@ export function usePublicMenu() {
         if (dbCategories.length > 0) {
           const grouped = buildSectionsFromData(dbCategories, dbItems);
           setSections(grouped);
+          saveLocalMenuSnapshot(dbCategories, dbItems);
           setLoading(false);
           return;
         } else if (dbItems.length > 0) {
@@ -168,12 +156,26 @@ export function usePublicMenu() {
           }));
           const grouped = buildSectionsFromData(fallbackCats, dbItems);
           setSections(grouped);
+          saveLocalMenuSnapshot(fallbackCats, dbItems);
           setLoading(false);
           return;
         }
       } catch (err) {
         console.warn("Error fetching menu from Supabase:", err);
       }
+    }
+
+    // 2. Check Local Storage snapshot if Supabase is offline or empty
+    const localSnapshot = getLocalMenuSnapshot();
+    if (
+      localSnapshot &&
+      Array.isArray(localSnapshot.categories) &&
+      localSnapshot.categories.length > 0
+    ) {
+      const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
+      setSections(grouped);
+      setLoading(false);
+      return;
     }
 
     // 3. Final fallback to ordered static sections
@@ -206,9 +208,44 @@ export function usePublicMenu() {
     window.addEventListener(MENU_ORDER_EVENT, handleUpdate);
     window.addEventListener("storage", handleUpdate);
 
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        bc = new BroadcastChannel("halal_ali_menu_channel");
+        bc.onmessage = () => {
+          fetchMenu();
+        };
+      } catch {
+        // ignore broadcast channel creation errors
+      }
+    }
+
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    if (isSupabaseConfigured) {
+      try {
+        realtimeChannel = supabase
+          .channel("public-menu-realtime")
+          .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () =>
+            fetchMenu(),
+          )
+          .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>
+            fetchMenu(),
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn("Could not subscribe to Supabase Realtime:", err);
+      }
+    }
+
     return () => {
       window.removeEventListener(MENU_ORDER_EVENT, handleUpdate);
       window.removeEventListener("storage", handleUpdate);
+      if (bc) {
+        bc.close();
+      }
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+      }
     };
   }, [fetchMenu]);
 

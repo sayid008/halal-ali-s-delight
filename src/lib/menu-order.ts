@@ -35,6 +35,15 @@ export function saveLocalMenuSnapshot(
         detail: { type: "snapshot", categories, items },
       }),
     );
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        const bc = new BroadcastChannel("halal_ali_menu_channel");
+        bc.postMessage("snapshot_updated");
+        bc.close();
+      } catch {
+        // ignore channel errors
+      }
+    }
   }
 }
 
