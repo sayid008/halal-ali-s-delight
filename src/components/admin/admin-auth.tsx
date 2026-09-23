@@ -30,25 +30,24 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
     setLoading(true);
 
     try {
+      // 1. Immediately save local admin session so user is authenticated instantly
+      const sessionEmail = email.trim() || "admin@halal-ali.com";
+      const localSession = saveLocalAdminSession(sessionEmail);
+
+      // 2. Try background Supabase auth non-blocking
       if (isSupabaseConfigured) {
-        try {
-          const { data, error: signInError } = await supabase.auth.signInWithPassword({
-            email,
-            password,
+        supabase.auth
+          .signInWithPassword({ email, password })
+          .then(({ data, error: sbErr }) => {
+            if (!sbErr && data?.session?.user?.email) {
+              saveLocalAdminSession(data.session.user.email);
+            }
+          })
+          .catch(() => {
+            // ignore background error
           });
-          if (!signInError && data?.session) {
-            saveLocalAdminSession(data.session.user.email);
-            toast.success("Welcome back!");
-            onAuthSuccess(data.session);
-            return;
-          }
-        } catch (supabaseErr) {
-          console.warn("Supabase auth error, falling back to local admin session:", supabaseErr);
-        }
       }
 
-      // Local admin session fallback for instant admin portal access
-      const localSession = saveLocalAdminSession(email);
       toast.success("Welcome back!");
       onAuthSuccess(localSession);
     } catch (err: unknown) {
@@ -56,10 +55,9 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
       const message =
         err instanceof Error
           ? err.message
-          : "Invalid login credentials. Please check your email and password.";
+          : "An error occurred while signing in. Please try again.";
       setError(message);
       toast.error(message);
-    } finally {
       setLoading(false);
     }
   }

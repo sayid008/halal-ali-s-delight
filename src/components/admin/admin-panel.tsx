@@ -164,7 +164,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const [copiedSql, setCopiedSql] = useState(false);
 
   async function loadData() {
-    setLoading(true);
+    if (items.length === 0 || categories.length === 0) {
+      setLoading(true);
+    }
     setDbTableError(null);
 
     // If Supabase is not configured, immediately use local snapshot and defaults without network delays
