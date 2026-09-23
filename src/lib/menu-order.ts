@@ -38,7 +38,7 @@ export function saveLocalMenuSnapshot(
     if (typeof BroadcastChannel !== "undefined") {
       try {
         const bc = new BroadcastChannel("halal_ali_menu_channel");
-        bc.postMessage("snapshot_updated");
+        bc.postMessage({ type: "snapshot_updated", categories, items });
         bc.close();
       } catch {
         // ignore channel errors

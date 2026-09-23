@@ -403,18 +403,47 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   useEffect(() => {
     loadData();
 
-    const handleLocalUpdate = () => {
+    const handleLocalUpdate = (e?: Event) => {
+      if (e && "detail" in e && e.detail) {
+        const detail = (e as CustomEvent).detail as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (detail.categories && Array.isArray(detail.categories)) {
+          setCategories(detail.categories);
+        }
+        if (detail.items && Array.isArray(detail.items)) {
+          setItems(detail.items);
+        }
+      }
       loadData();
     };
 
-    window.addEventListener(MENU_ORDER_EVENT, handleLocalUpdate);
-    window.addEventListener("storage", handleLocalUpdate);
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        loadData();
+      }
+    };
+
+    window.addEventListener(MENU_ORDER_EVENT, handleLocalUpdate as EventListener);
+    window.addEventListener("storage", handleLocalUpdate as EventListener);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
 
     let bc: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
       try {
         bc = new BroadcastChannel("halal_ali_menu_channel");
-        bc.onmessage = () => {
+        bc.onmessage = (msgEvent) => {
+          if (msgEvent.data && typeof msgEvent.data === "object") {
+            if (msgEvent.data.categories && Array.isArray(msgEvent.data.categories)) {
+              setCategories(msgEvent.data.categories);
+            }
+            if (msgEvent.data.items && Array.isArray(msgEvent.data.items)) {
+              setItems(msgEvent.data.items);
+            }
+          }
           loadData();
         };
       } catch {
@@ -440,8 +469,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     return () => {
-      window.removeEventListener(MENU_ORDER_EVENT, handleLocalUpdate);
-      window.removeEventListener("storage", handleLocalUpdate);
+      window.removeEventListener(MENU_ORDER_EVENT, handleLocalUpdate as EventListener);
+      window.removeEventListener("storage", handleLocalUpdate as EventListener);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
       if (bc) {
         bc.close();
       }

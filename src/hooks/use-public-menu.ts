@@ -201,18 +201,46 @@ export function usePublicMenu() {
   useEffect(() => {
     fetchMenu();
 
-    const handleUpdate = () => {
+    const handleUpdate = (e?: Event) => {
+      if (e && "detail" in e && e.detail) {
+        const detail = (e as CustomEvent).detail as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (detail.categories && detail.items && Array.isArray(detail.categories)) {
+          const grouped = buildSectionsFromData(detail.categories, detail.items);
+          setSections(grouped);
+        }
+      }
       fetchMenu();
     };
 
-    window.addEventListener(MENU_ORDER_EVENT, handleUpdate);
-    window.addEventListener("storage", handleUpdate);
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchMenu();
+      }
+    };
+
+    window.addEventListener(MENU_ORDER_EVENT, handleUpdate as EventListener);
+    window.addEventListener("storage", handleUpdate as EventListener);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
 
     let bc: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
       try {
         bc = new BroadcastChannel("halal_ali_menu_channel");
-        bc.onmessage = () => {
+        bc.onmessage = (msgEvent) => {
+          if (
+            msgEvent.data &&
+            typeof msgEvent.data === "object" &&
+            msgEvent.data.categories &&
+            msgEvent.data.items
+          ) {
+            const grouped = buildSectionsFromData(msgEvent.data.categories, msgEvent.data.items);
+            setSections(grouped);
+          }
           fetchMenu();
         };
       } catch {
@@ -238,8 +266,11 @@ export function usePublicMenu() {
     }
 
     return () => {
-      window.removeEventListener(MENU_ORDER_EVENT, handleUpdate);
-      window.removeEventListener("storage", handleUpdate);
+      window.removeEventListener(MENU_ORDER_EVENT, handleUpdate as EventListener);
+      window.removeEventListener("storage", handleUpdate as EventListener);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
       if (bc) {
         bc.close();
       }
