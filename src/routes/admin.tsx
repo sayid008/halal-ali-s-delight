@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, Component, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -12,6 +12,57 @@ import { AdminAuth } from "@/components/admin/admin-auth";
 import { AdminPanel } from "@/components/admin/admin-panel";
 import { Toaster } from "@/components/ui/sonner";
 import { Loader2 } from "lucide-react";
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  onReset?: () => void;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class AdminErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("AdminPanel error boundary caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-[400px] flex-col items-center justify-center p-8 text-center">
+          <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-6 max-w-md">
+            <h2 className="text-lg font-bold text-foreground mb-2">Admin Portal Error</h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              {this.state.error?.message ||
+                "An unexpected error occurred while loading the Admin Panel."}
+            </p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                if (this.props.onReset) this.props.onReset();
+              }}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Reload Dashboard
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -46,15 +97,30 @@ function AdminPage() {
           );
           const res = await Promise.race([supabase.auth.getSession(), timeoutPromise]);
           if (mounted) {
-            setSession(res.data.session);
+            if (res.data.session) {
+              setSession(res.data.session);
+            } else {
+              const currentLocal = getLocalAdminSession();
+              if (currentLocal) {
+                setSession(currentLocal);
+              } else {
+                setSession(null);
+              }
+            }
             setLoading(false);
           }
         } catch (err) {
           console.error("Session check error:", err);
-          if (mounted) setLoading(false);
+          if (mounted) {
+            const currentLocal = getLocalAdminSession();
+            setSession(currentLocal);
+            setLoading(false);
+          }
         }
       } else {
         if (mounted) {
+          const currentLocal = getLocalAdminSession();
+          setSession(currentLocal);
           setLoading(false);
         }
       }
@@ -69,6 +135,11 @@ function AdminPage() {
           if (mounted) {
             if (newSession) {
               setSession(newSession);
+            } else {
+              const currentLocal = getLocalAdminSession();
+              if (currentLocal) {
+                setSession(currentLocal);
+              }
             }
             setLoading(false);
           }
@@ -102,20 +173,22 @@ function AdminPage() {
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-background">
       <Toaster richColors position="top-right" />
       {session ? (
-        <AdminPanel
-          session={session}
-          onSignOut={async () => {
-            clearLocalAdminSession();
-            if (isSupabaseConfigured) {
-              try {
-                await supabase.auth.signOut();
-              } catch (e) {
-                console.warn("Error signing out from Supabase:", e);
+        <AdminErrorBoundary onReset={() => window.location.reload()}>
+          <AdminPanel
+            session={session}
+            onSignOut={async () => {
+              clearLocalAdminSession();
+              if (isSupabaseConfigured) {
+                try {
+                  await supabase.auth.signOut();
+                } catch (e) {
+                  console.warn("Error signing out from Supabase:", e);
+                }
               }
-            }
-            setSession(null);
-          }}
-        />
+              setSession(null);
+            }}
+          />
+        </AdminErrorBoundary>
       ) : (
         <AdminAuth
           onAuthSuccess={(newSession) => {
