@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import {
   Tag,
   Upload,
-  RefreshCw,
+  Loader2,
   Save,
   Check,
   RotateCcw,
@@ -242,7 +242,7 @@ export function SpecialOfferManager() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center rounded-2xl border border-border bg-card">
-        <RefreshCw className="size-8 animate-spin text-muted-foreground" />
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -299,11 +299,7 @@ export function SpecialOfferManager() {
             disabled={saving}
             className="h-8 sm:h-9 gap-1.5 bg-primary text-xs font-semibold flex-1 sm:flex-none justify-center"
           >
-            {saving ? (
-              <RefreshCw className="size-3.5 animate-spin" />
-            ) : (
-              <Save className="size-3.5" />
-            )}
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
             <span>Save All</span>
           </Button>
         </div>
@@ -467,7 +463,7 @@ export function SpecialOfferManager() {
                 className="h-10 gap-2 border-dashed font-medium text-xs flex-1"
               >
                 {uploading ? (
-                  <RefreshCw className="size-4 animate-spin text-muted-foreground" />
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
                 ) : (
                   <Upload className="size-4 text-gold" />
                 )}
@@ -815,7 +811,7 @@ export function SpecialOfferManager() {
                 className="h-8 gap-1.5 bg-primary text-xs font-semibold"
               >
                 {saving ? (
-                  <RefreshCw className="size-3.5 animate-spin" />
+                  <Loader2 className="size-3.5 animate-spin" />
                 ) : (
                   <Save className="size-3.5" />
                 )}
