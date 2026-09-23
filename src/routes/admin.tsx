@@ -89,25 +89,31 @@ function AdminPage() {
         return;
       }
 
-      // 2. If Supabase is configured with real credentials, check Supabase session strictly
+      // 2. If Supabase is configured with real credentials, check Supabase session
       if (isSupabaseConfigured) {
         try {
           const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) =>
-            setTimeout(() => resolve({ data: { session: null } }), 4000),
+            setTimeout(() => resolve({ data: { session: null } }), 2500),
           );
           const res = await Promise.race([supabase.auth.getSession(), timeoutPromise]);
           if (mounted) {
-            if (res.data?.session) {
+            if (res.data.session) {
               setSession(res.data.session);
             } else {
-              setSession(null);
+              const currentLocal = getLocalAdminSession();
+              if (currentLocal) {
+                setSession(currentLocal);
+              } else {
+                setSession(null);
+              }
             }
             setLoading(false);
           }
         } catch (err) {
           console.error("Session check error:", err);
           if (mounted) {
-            setSession(null);
+            const currentLocal = getLocalAdminSession();
+            setSession(currentLocal);
             setLoading(false);
           }
         }
@@ -125,13 +131,15 @@ function AdminPage() {
     let authUnsubscribe = () => {};
     if (isSupabaseConfigured) {
       try {
-        const { data: authListener } = supabase.auth.onAuthStateChange((event, newSession) => {
+        const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
           if (mounted) {
-            if (event === "SIGNED_OUT" || !newSession) {
-              clearLocalAdminSession();
-              setSession(null);
-            } else {
+            if (newSession) {
               setSession(newSession);
+            } else {
+              const currentLocal = getLocalAdminSession();
+              if (currentLocal) {
+                setSession(currentLocal);
+              }
             }
             setLoading(false);
           }

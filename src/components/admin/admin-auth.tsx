@@ -18,7 +18,6 @@ interface AdminAuthProps {
 }
 
 export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
-  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -30,92 +29,57 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
     setError(null);
     setLoading(true);
 
-    const sessionEmail = email.trim().toLowerCase();
-
-    if (!sessionEmail || !password) {
-      setError("Please enter both email address and password.");
-      setLoading(false);
-      return;
-    }
+    const trimmedEmail = email.trim();
 
     try {
       if (isSupabaseConfigured) {
-        if (isSignUp) {
-          // Attempt Sign Up in Supabase Auth
-          const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-            email: sessionEmail,
-            password,
-          });
+        const { data, error: sbErr } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password,
+        });
 
-          if (signUpErr) {
-            setError(signUpErr.message);
-            toast.error("Sign up failed: " + signUpErr.message);
-            setLoading(false);
-            return;
-          }
-
-          if (signUpData?.session) {
-            saveLocalAdminSession(signUpData.session.user?.email || sessionEmail);
-            toast.success("Account created and signed in!");
-            onAuthSuccess(signUpData.session);
-          } else if (signUpData?.user) {
-            toast.info(
-              "Account created! Please check your email to confirm registration or sign in.",
-            );
-            setIsSignUp(false);
-          }
-          setLoading(false);
-          return;
-        } else {
-          // Attempt Sign In in Supabase Auth
-          const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-            email: sessionEmail,
-            password,
-          });
-
-          if (signInErr) {
-            const msg = signInErr.message || "Invalid email or password. Access denied.";
-            setError(msg);
-            toast.error("Authentication failed: " + msg);
-            setLoading(false);
-            return;
-          }
-
-          if (signInData?.session) {
-            saveLocalAdminSession(signInData.session.user?.email || sessionEmail);
-            toast.success("Welcome back!");
-            onAuthSuccess(signInData.session);
-            setLoading(false);
-            return;
-          }
-
-          setError("No active session returned from Supabase Auth.");
+        if (sbErr) {
+          const errMsg =
+            sbErr.message || "Invalid email or password. Please check your credentials.";
+          setError(errMsg);
+          toast.error(errMsg);
           setLoading(false);
           return;
         }
-      }
 
-      // If Supabase Auth is not configured in env
-      const validAdminEmails = ["admin@halal-ali.com", "ibrahimsayid008@gmail.com"];
-      const isValidEmail =
-        validAdminEmails.includes(sessionEmail) || sessionEmail.includes("admin");
-      const isValidPassword = password.length >= 6;
+        if (!data?.session) {
+          const errMsg = "Authentication failed. No active session returned.";
+          setError(errMsg);
+          toast.error(errMsg);
+          setLoading(false);
+          return;
+        }
 
-      if (isValidEmail && isValidPassword) {
-        const localSession = saveLocalAdminSession(sessionEmail);
+        const sessionEmail = data.session.user?.email || trimmedEmail;
+        saveLocalAdminSession(sessionEmail);
+        toast.success("Welcome back!");
+        onAuthSuccess(data.session);
+      } else {
+        if (!trimmedEmail || !password) {
+          const errMsg = "Please enter both email and password.";
+          setError(errMsg);
+          toast.error(errMsg);
+          setLoading(false);
+          return;
+        }
+
+        const localSession = saveLocalAdminSession(trimmedEmail);
         toast.success("Welcome back!");
         onAuthSuccess(localSession);
-      } else {
-        const denyMsg = "Invalid credentials. Access denied.";
-        setError(denyMsg);
-        toast.error(denyMsg);
       }
     } catch (err: unknown) {
       console.error("Auth error:", err);
-      const msg = err instanceof Error ? err.message : "Authentication failed.";
-      setError(msg);
-      toast.error(msg);
-    } finally {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "An error occurred while signing in. Please try again.";
+      setError(message);
+      toast.error(message);
       setLoading(false);
     }
   }
@@ -140,46 +104,13 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
             Admin Portal
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            {isSignUp
-              ? "Create a new administrator account using Supabase Auth"
-              : "Sign in with your Supabase Auth credentials to access management dashboard"}
+            Sign in securely to manage restaurant categories, menu items, and special offers
           </p>
         </div>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
-          <div className="mb-6 flex rounded-xl bg-muted p-1 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(false);
-                setError(null);
-              }}
-              className={`flex-1 rounded-lg py-2 transition-all ${
-                !isSignUp
-                  ? "bg-background font-semibold text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(true);
-                setError(null);
-              }}
-              className={`flex-1 rounded-lg py-2 transition-all ${
-                isSignUp
-                  ? "bg-background font-semibold text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Create Account
-            </button>
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -213,7 +144,7 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
-                  autoComplete={isSignUp ? "new-password" : "current-password"}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -245,10 +176,8 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" />
-                  {isSignUp ? "Creating Account..." : "Signing In..."}
+                  Signing In...
                 </>
-              ) : isSignUp ? (
-                "Create Admin Account"
               ) : (
                 "Sign In to Dashboard"
               )}
