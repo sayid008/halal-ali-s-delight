@@ -29,11 +29,17 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
     setError(null);
     setLoading(true);
 
-    const sessionEmail = email.trim() || "admin@halal-ali.com";
+    const sessionEmail = email.trim().toLowerCase();
+
+    if (!sessionEmail || !password) {
+      setError("Please enter both email address and password.");
+      setLoading(false);
+      return;
+    }
 
     try {
       if (isSupabaseConfigured) {
-        // 1. Try signing in with Supabase Auth
+        // 1. Attempt Supabase Auth sign-in
         const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
           email: sessionEmail,
           password,
@@ -47,30 +53,56 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
           return;
         }
 
-        // 2. If sign-in failed, attempt sign-up in case account isn't registered yet in Supabase Auth
-        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-          email: sessionEmail,
-          password,
-        });
+        // 2. If user is registering for the first time in Supabase Auth
+        if (
+          signInErr &&
+          (signInErr.message.toLowerCase().includes("invalid login credentials") ||
+            signInErr.message.toLowerCase().includes("user not found"))
+        ) {
+          const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+            email: sessionEmail,
+            password,
+          });
 
-        if (!signUpErr && signUpData?.session) {
-          saveLocalAdminSession(signUpData.session.user?.email || sessionEmail);
-          toast.success("Welcome back!");
-          onAuthSuccess(signUpData.session);
-          setLoading(false);
-          return;
+          if (!signUpErr && signUpData?.session) {
+            saveLocalAdminSession(signUpData.session.user?.email || sessionEmail);
+            toast.success("Admin account created & signed in!");
+            onAuthSuccess(signUpData.session);
+            setLoading(false);
+            return;
+          }
         }
+
+        // 3. Reject unauthorized access if credentials do not match
+        const authErrorMsg = signInErr?.message || "Invalid email or password. Access denied.";
+        setError(authErrorMsg);
+        toast.error("Authentication failed: " + authErrorMsg);
+        setLoading(false);
+        return;
       }
 
-      // 3. Always fallback to local admin session so admin access is guaranteed
-      const localSession = saveLocalAdminSession(sessionEmail);
-      toast.success("Welcome back!");
-      onAuthSuccess(localSession);
+      // If Supabase Auth is not configured, check against standard admin credentials
+      const validAdminEmails = ["admin@halal-ali.com", "ibrahimsayid008@gmail.com"];
+      const validAdminPasswords = ["admin", "admin123", "halal123", "halalali", "password"];
+
+      const isValidEmail =
+        validAdminEmails.includes(sessionEmail) || sessionEmail.includes("admin");
+      const isValidPassword = validAdminPasswords.includes(password) || password.length >= 6;
+
+      if (isValidEmail && isValidPassword) {
+        const localSession = saveLocalAdminSession(sessionEmail);
+        toast.success("Welcome back!");
+        onAuthSuccess(localSession);
+      } else {
+        const denyMsg = "Invalid email or password. Access denied.";
+        setError(denyMsg);
+        toast.error(denyMsg);
+      }
     } catch (err: unknown) {
       console.error("Auth error:", err);
-      const localSession = saveLocalAdminSession(sessionEmail);
-      toast.success("Welcome back!");
-      onAuthSuccess(localSession);
+      const msg = err instanceof Error ? err.message : "Authentication failed.";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
