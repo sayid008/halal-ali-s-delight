@@ -140,6 +140,25 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
   }
 
   try {
+    const res = await fetch("/api/special-offer");
+    if (res.ok) {
+      const data = (await res.json()) as { offer?: SpecialOffer };
+      if (data.offer) {
+        if (isStorageAvailable()) {
+          try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data.offer));
+          } catch {
+            // ignore
+          }
+        }
+        return data.offer;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
     // Try reading from a special_offers or site_settings table
     const { data, error } = await supabase
       .from("special_offers")
@@ -204,6 +223,17 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
     } catch (err) {
       console.warn("Failed to write to localStorage:", err);
     }
+  }
+
+  // Persist to server API database
+  if (typeof fetch !== "undefined") {
+    fetch("/api/special-offer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(toSave),
+    }).catch(() => {
+      // ignore network errors
+    });
   }
 
   // Notify listeners on current window

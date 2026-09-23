@@ -12,8 +12,6 @@ export const isSupabaseConfigured = Boolean(
   !String(import.meta.env.VITE_SUPABASE_URL).includes("placeholder-project"),
 );
 
-export const LOCAL_ADMIN_STORAGE_KEY = "halal_ali_admin_session";
-
 export interface AdminUserSession {
   access_token: string;
   token_type: string;
@@ -22,51 +20,6 @@ export interface AdminUserSession {
     email: string;
     role?: string;
   };
-}
-
-export function getLocalAdminSession(): AdminUserSession | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(LOCAL_ADMIN_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.user && parsed.user.email) {
-      return parsed as AdminUserSession;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-export function saveLocalAdminSession(email?: string): AdminUserSession {
-  const session: AdminUserSession = {
-    access_token: "local-admin-" + Date.now(),
-    token_type: "bearer",
-    user: {
-      id: "local-admin-id",
-      email: email?.trim() || "admin@halal-ali.com",
-      role: "admin",
-    },
-  };
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.setItem(LOCAL_ADMIN_STORAGE_KEY, JSON.stringify(session));
-    } catch (e) {
-      console.warn("Failed to write admin session to localStorage:", e);
-    }
-  }
-  return session;
-}
-
-export function clearLocalAdminSession() {
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.removeItem(LOCAL_ADMIN_STORAGE_KEY);
-    } catch (e) {
-      console.warn("Failed to remove admin session from localStorage:", e);
-    }
-  }
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

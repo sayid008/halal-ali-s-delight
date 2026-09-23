@@ -61,9 +61,6 @@ export function SiteFooter() {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs opacity-60">
           <p>100% halal certified. Dine in or take away, seven days a week.</p>
-          <a href="/admin" className="hover:text-gold hover:underline transition-colors">
-            Admin Portal
-          </a>
         </div>
       </div>
     </footer>

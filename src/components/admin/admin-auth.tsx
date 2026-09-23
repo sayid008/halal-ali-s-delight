@@ -1,10 +1,5 @@
 import { useState } from "react";
-import {
-  supabase,
-  isSupabaseConfigured,
-  saveLocalAdminSession,
-  type AdminUserSession,
-} from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +9,7 @@ import { Lock, Mail, Loader2, ArrowLeft, Eye, EyeOff, KeyRound, CheckCircle2 } f
 import { toast } from "sonner";
 
 interface AdminAuthProps {
-  onAuthSuccess: (session?: AdminUserSession | Session | null) => void;
+  onAuthSuccess: (session: Session) => void;
 }
 
 export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
@@ -31,47 +26,49 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
 
     const trimmedEmail = email.trim();
 
+    if (!trimmedEmail || !password) {
+      const errMsg = "Please enter both email and password.";
+      setError(errMsg);
+      toast.error(errMsg);
+      setLoading(false);
+      return;
+    }
+
     try {
-      if (isSupabaseConfigured) {
-        const { data, error: sbErr } = await supabase.auth.signInWithPassword({
-          email: trimmedEmail,
-          password,
-        });
+      // 1. Supabase Authentication email/password login
+      const { data: authData, error: sbErr } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
 
-        if (sbErr) {
-          const errMsg =
-            sbErr.message || "Invalid email or password. Please check your credentials.";
-          setError(errMsg);
-          toast.error(errMsg);
-          setLoading(false);
-          return;
-        }
-
-        if (!data?.session) {
-          const errMsg = "Authentication failed. No active session returned.";
-          setError(errMsg);
-          toast.error(errMsg);
-          setLoading(false);
-          return;
-        }
-
-        const sessionEmail = data.session.user?.email || trimmedEmail;
-        saveLocalAdminSession(sessionEmail);
-        toast.success("Welcome back!");
-        onAuthSuccess(data.session);
-      } else {
-        if (!trimmedEmail || !password) {
-          const errMsg = "Please enter both email and password.";
-          setError(errMsg);
-          toast.error(errMsg);
-          setLoading(false);
-          return;
-        }
-
-        const localSession = saveLocalAdminSession(trimmedEmail);
-        toast.success("Welcome back!");
-        onAuthSuccess(localSession);
+      if (sbErr || !authData?.user || !authData?.session) {
+        const errMsg =
+          sbErr?.message || "Invalid email or password. Please check your credentials.";
+        setError(errMsg);
+        toast.error(errMsg);
+        setLoading(false);
+        return;
       }
+
+      // 2. Verify that authenticated user's UUID exists in public.admin_users
+      const { data: adminRecord, error: adminErr } = await supabase
+        .from("admin_users")
+        .select("id")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+
+      if (adminErr || !adminRecord) {
+        await supabase.auth.signOut();
+        const errMsg = "Unauthorized admin account";
+        setError(errMsg);
+        toast.error(errMsg);
+        setLoading(false);
+        return;
+      }
+
+      // 3. Only then allow access to the admin panel
+      toast.success("Welcome back!");
+      onAuthSuccess(authData.session);
     } catch (err: unknown) {
       console.error("Auth error:", err);
       const message =

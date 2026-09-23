@@ -1,13 +1,7 @@
 import React, { useEffect, useState, Component, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import type { Session } from "@supabase/supabase-js";
-import {
-  supabase,
-  isSupabaseConfigured,
-  getLocalAdminSession,
-  clearLocalAdminSession,
-  type AdminUserSession,
-} from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { AdminAuth } from "@/components/admin/admin-auth";
 import { AdminPanel } from "@/components/admin/admin-panel";
 import { Toaster } from "@/components/ui/sonner";
@@ -72,55 +66,62 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminPage() {
-  const [session, setSession] = useState<Session | AdminUserSession | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
-    async function checkAuth() {
-      // 1. Check local admin session first
-      const localSession = getLocalAdminSession();
-      if (localSession) {
+    async function verifyAndSetSession(sbSession: Session | null) {
+      if (!sbSession?.user) {
         if (mounted) {
-          setSession(localSession);
+          setSession(null);
           setLoading(false);
         }
         return;
       }
 
-      // 2. If Supabase is configured with real credentials, check Supabase session
-      if (isSupabaseConfigured) {
-        try {
-          const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) =>
-            setTimeout(() => resolve({ data: { session: null } }), 2500),
-          );
-          const res = await Promise.race([supabase.auth.getSession(), timeoutPromise]);
-          if (mounted) {
-            if (res.data.session) {
-              setSession(res.data.session);
-            } else {
-              const currentLocal = getLocalAdminSession();
-              if (currentLocal) {
-                setSession(currentLocal);
-              } else {
-                setSession(null);
-              }
-            }
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error("Session check error:", err);
-          if (mounted) {
-            const currentLocal = getLocalAdminSession();
-            setSession(currentLocal);
-            setLoading(false);
-          }
-        }
-      } else {
+      try {
+        const { data: adminRecord, error: adminErr } = await supabase
+          .from("admin_users")
+          .select("id")
+          .eq("id", sbSession.user.id)
+          .maybeSingle();
+
         if (mounted) {
-          const currentLocal = getLocalAdminSession();
-          setSession(currentLocal);
+          if (!adminErr && adminRecord) {
+            setSession(sbSession);
+          } else {
+            await supabase.auth.signOut();
+            setSession(null);
+          }
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Error verifying admin user:", err);
+        if (mounted) {
+          await supabase.auth.signOut();
+          setSession(null);
+          setLoading(false);
+        }
+      }
+    }
+
+    async function checkAuth() {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error || !data?.session) {
+          if (mounted) {
+            setSession(null);
+            setLoading(false);
+          }
+          return;
+        }
+        await verifyAndSetSession(data.session);
+      } catch (err) {
+        console.error("Session check error:", err);
+        if (mounted) {
+          setSession(null);
           setLoading(false);
         }
       }
@@ -129,25 +130,21 @@ function AdminPage() {
     checkAuth();
 
     let authUnsubscribe = () => {};
-    if (isSupabaseConfigured) {
-      try {
-        const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-          if (mounted) {
-            if (newSession) {
-              setSession(newSession);
-            } else {
-              const currentLocal = getLocalAdminSession();
-              if (currentLocal) {
-                setSession(currentLocal);
-              }
-            }
-            setLoading(false);
-          }
-        });
-        authUnsubscribe = () => authListener.subscription.unsubscribe();
-      } catch (e) {
-        console.warn("Failed to attach Supabase auth state change listener:", e);
-      }
+    try {
+      const { data: authListener } = supabase.auth.onAuthStateChange((event, newSession) => {
+        if (!mounted) return;
+        if (event === "SIGNED_OUT" || !newSession) {
+          setSession(null);
+          setLoading(false);
+          return;
+        }
+        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+          verifyAndSetSession(newSession);
+        }
+      });
+      authUnsubscribe = () => authListener.subscription.unsubscribe();
+    } catch (e) {
+      console.warn("Failed to attach Supabase auth state change listener:", e);
     }
 
     return () => {
@@ -177,13 +174,10 @@ function AdminPage() {
           <AdminPanel
             session={session}
             onSignOut={async () => {
-              clearLocalAdminSession();
-              if (isSupabaseConfigured) {
-                try {
-                  await supabase.auth.signOut();
-                } catch (e) {
-                  console.warn("Error signing out from Supabase:", e);
-                }
+              try {
+                await supabase.auth.signOut();
+              } catch (e) {
+                console.warn("Error signing out from Supabase:", e);
               }
               setSession(null);
             }}
@@ -192,12 +186,7 @@ function AdminPage() {
       ) : (
         <AdminAuth
           onAuthSuccess={(newSession) => {
-            if (newSession) {
-              setSession(newSession);
-            } else {
-              const local = getLocalAdminSession();
-              setSession(local);
-            }
+            setSession(newSession);
           }}
         />
       )}

@@ -168,12 +168,32 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
     setDbTableError(null);
 
-    // If Supabase is not configured, immediately use local snapshot and defaults without network delays
+    // If Supabase is not configured, load from server API database, local snapshot, or defaults
     if (!isSupabaseConfigured) {
+      try {
+        const res = await fetch("/api/menu");
+        if (res.ok) {
+          const apiData = (await res.json()) as {
+            categories?: DatabaseCategory[];
+            items?: DatabaseMenuItem[];
+          };
+          if (apiData.categories && apiData.categories.length > 0) {
+            setCategories(apiData.categories);
+            setItems(apiData.items || []);
+            setHasInitialLoaded(true);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // ignore fetch error
+      }
+
       const cached = getLocalMenuSnapshot();
       if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
         setCategories(cached.categories);
         setItems(cached.items || []);
+        saveLocalMenuSnapshot(cached.categories, cached.items || []);
       } else {
         setCategories(defaultCategories);
         setItems(defaultItems);

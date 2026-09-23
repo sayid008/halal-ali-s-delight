@@ -29,6 +29,16 @@ export function saveLocalMenuSnapshot(
     }
   }
 
+  if (typeof fetch !== "undefined") {
+    fetch("/api/menu", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ categories, items }),
+    }).catch(() => {
+      // ignore network errors
+    });
+  }
+
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent(MENU_ORDER_EVENT, {

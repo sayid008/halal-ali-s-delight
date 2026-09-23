@@ -165,7 +165,26 @@ export function usePublicMenu() {
       }
     }
 
-    // 2. Check Local Storage snapshot if Supabase is offline or empty
+    // 2. Try fetching from server API database
+    try {
+      const res = await fetch("/api/menu");
+      if (res.ok) {
+        const data = (await res.json()) as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (data.categories && data.categories.length > 0) {
+          const grouped = buildSectionsFromData(data.categories, data.items || []);
+          setSections(grouped);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // ignore network error
+    }
+
+    // 3. Check Local Storage snapshot if Supabase and server API are offline or empty
     const localSnapshot = getLocalMenuSnapshot();
     if (
       localSnapshot &&
