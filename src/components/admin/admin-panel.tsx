@@ -184,9 +184,23 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     try {
+      const timeoutPromise = new Promise<{ data: null; error: { message: string; code: string } }>(
+        (resolve) =>
+          setTimeout(
+            () => resolve({ data: null, error: { message: "Request timeout", code: "TIMEOUT" } }),
+            3500,
+          ),
+      );
+
       const [catRes, itemRes] = await Promise.all([
-        supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-        supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+        Promise.race([
+          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+          timeoutPromise,
+        ]),
+        Promise.race([
+          supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+          timeoutPromise,
+        ]),
       ]);
 
       const isCatTableMissing = Boolean(
