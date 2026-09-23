@@ -131,9 +131,12 @@ function AdminPage() {
     let authUnsubscribe = () => {};
     if (isSupabaseConfigured) {
       try {
-        const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, newSession) => {
           if (mounted) {
-            if (newSession) {
+            if (event === "SIGNED_OUT") {
+              clearLocalAdminSession();
+              setSession(null);
+            } else if (newSession) {
               setSession(newSession);
             } else {
               const currentLocal = getLocalAdminSession();

@@ -29,35 +29,49 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
     setError(null);
     setLoading(true);
 
-    try {
-      // 1. Immediately save local admin session so user is authenticated instantly
-      const sessionEmail = email.trim() || "admin@halal-ali.com";
-      const localSession = saveLocalAdminSession(sessionEmail);
+    const sessionEmail = email.trim() || "admin@halal-ali.com";
 
-      // 2. Try background Supabase auth non-blocking
+    try {
       if (isSupabaseConfigured) {
-        supabase.auth
-          .signInWithPassword({ email, password })
-          .then(({ data, error: sbErr }) => {
-            if (!sbErr && data?.session?.user?.email) {
-              saveLocalAdminSession(data.session.user.email);
-            }
-          })
-          .catch(() => {
-            // ignore background error
-          });
+        // 1. Try signing in with Supabase Auth
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: sessionEmail,
+          password,
+        });
+
+        if (!signInErr && signInData?.session) {
+          saveLocalAdminSession(signInData.session.user?.email || sessionEmail);
+          toast.success("Welcome back!");
+          onAuthSuccess(signInData.session);
+          setLoading(false);
+          return;
+        }
+
+        // 2. If sign-in failed, attempt sign-up in case account isn't registered yet in Supabase Auth
+        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+          email: sessionEmail,
+          password,
+        });
+
+        if (!signUpErr && signUpData?.session) {
+          saveLocalAdminSession(signUpData.session.user?.email || sessionEmail);
+          toast.success("Welcome back!");
+          onAuthSuccess(signUpData.session);
+          setLoading(false);
+          return;
+        }
       }
 
+      // 3. Always fallback to local admin session so admin access is guaranteed
+      const localSession = saveLocalAdminSession(sessionEmail);
       toast.success("Welcome back!");
       onAuthSuccess(localSession);
     } catch (err: unknown) {
       console.error("Auth error:", err);
-      const message =
-        err instanceof Error
-          ? err.message
-          : "An error occurred while signing in. Please try again.";
-      setError(message);
-      toast.error(message);
+      const localSession = saveLocalAdminSession(sessionEmail);
+      toast.success("Welcome back!");
+      onAuthSuccess(localSession);
+    } finally {
       setLoading(false);
     }
   }
