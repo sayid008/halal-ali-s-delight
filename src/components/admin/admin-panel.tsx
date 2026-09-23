@@ -1347,18 +1347,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={loadData}
-              disabled={loading}
-              className="h-8 px-2.5 sm:px-3 gap-1 text-xs shrink-0"
-              title="Refresh Data from Database"
-            >
-              <RefreshCw className={`size-3 ${loading ? "animate-spin" : ""}`} />
-              <span className="hidden xs:inline">Refresh</span>
-            </Button>
-
             {activeTab === "items" && (
               <Button
                 size="sm"
