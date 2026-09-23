@@ -152,33 +152,23 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
         Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
 
       for (const cat of updated) {
-        const payload = {
-          name: cat.name,
-          slug: cat.slug || cat.id,
-          sort_order: cat.sort_order,
-          available: cat.available !== false,
-        };
-
         if (cat.id && isUUID(cat.id)) {
-          const { data: res } = await supabase
-            .from("categories")
+          const { error } = await supabase
+            .from("menu_categories")
             .update({ sort_order: cat.sort_order })
-            .eq("id", cat.id)
-            .select();
+            .eq("id", cat.id);
 
-          if (!res || res.length === 0) {
-            await supabase.from("categories").upsert({ ...payload, id: cat.id });
+          if (error && cat.slug) {
+            await supabase
+              .from("menu_categories")
+              .update({ sort_order: cat.sort_order })
+              .eq("slug", cat.slug);
           }
         } else if (cat.slug) {
-          const { data: res } = await supabase
-            .from("categories")
+          await supabase
+            .from("menu_categories")
             .update({ sort_order: cat.sort_order })
-            .eq("slug", cat.slug)
-            .select();
-
-          if (!res || res.length === 0) {
-            await supabase.from("categories").upsert(payload, { onConflict: "slug" });
-          }
+            .eq("slug", cat.slug);
         }
       }
     } catch (err) {

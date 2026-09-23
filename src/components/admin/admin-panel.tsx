@@ -107,7 +107,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
       return cached.categories;
     }
-    return defaultCategories;
+    return [];
   });
   const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
@@ -215,7 +215,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       const [catRes, itemRes] = await Promise.all([
         Promise.race([
-          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+          supabase.from("menu_categories").select("*").order("sort_order", { ascending: true }),
           timeoutPromise,
         ]),
         Promise.race([
@@ -243,7 +243,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       if (isCatTableMissing || isItemTableMissing) {
         const missing: string[] = [];
-        if (isCatTableMissing) missing.push("'categories'");
+        if (isCatTableMissing) missing.push("'menu_categories'");
         if (isItemTableMissing) missing.push("'menu_items'");
         setDbTableError(
           `Supabase table ${missing.join(" and ")} is not created in your database yet. Copy and run the SQL below in your Supabase SQL Editor.`,
@@ -271,131 +271,26 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       if (expiredCatIds.length > 0) {
         for (const id of expiredCatIds) {
-          supabase.from("categories").delete().eq("id", id);
+          supabase.from("menu_categories").delete().eq("id", id);
         }
         loadedCategories = loadedCategories.filter((c) => !expiredCatIds.includes(c.id));
       }
 
-      // If Supabase tables are completely empty on the very first initial load, seed them into the live database
-      if (
-        !hasInitialLoaded &&
-        loadedCategories.length === 0 &&
-        loadedItems.length === 0 &&
-        !catRes.error &&
-        !itemRes.error
-      ) {
-        try {
-          // Sync categories to live Supabase DB
-          const catInserts = homeSections.map((sec, idx) => ({
-            name: sec.title,
-            slug: sec.id,
-            sort_order: idx + 1,
-          }));
-
-          const { data: upsertedCats } = await supabase
-            .from("categories")
-            .upsert(catInserts, { onConflict: "slug" })
-            .select();
-
-          const catMap = new Map<string, string>();
-          if (upsertedCats && upsertedCats.length > 0) {
-            (upsertedCats as DatabaseCategory[]).forEach((c) => catMap.set(c.slug, c.id));
-            loadedCategories = upsertedCats as DatabaseCategory[];
-          } else {
-            loadedCategories = defaultCategories;
-          }
-
-          // Sync dishes to live Supabase DB
-          const dishInserts: Array<{
-            name: string;
-            description: string;
-            price: number;
-            category_id: string | null;
-            image_url: string | null;
-            available: boolean;
-            sort_order: number;
-          }> = [];
-
-          homeSections.forEach((sec, sIdx) => {
-            const catId = catMap.get(sec.id) || null;
-            sec.items.forEach((dish, dIdx) => {
-              let priceNum = 250;
-              if (typeof dish.price === "number") {
-                priceNum = dish.price < 50 ? Math.round(dish.price * 50) : dish.price;
-              } else if (typeof dish.price === "string") {
-                const parsed = parseFloat(dish.price.replace(/[^\d.]/g, ""));
-                if (!isNaN(parsed)) {
-                  priceNum = parsed < 50 ? Math.round(parsed * 50) : Math.round(parsed);
-                }
-              }
-
-              dishInserts.push({
-                name: dish.name,
-                description: dish.description,
-                price: priceNum,
-                category_id: catId,
-                image_url: dish.image || null,
-                available: true,
-                sort_order: (sIdx + 1) * 10 + (dIdx + 1),
-              });
-            });
-          });
-
-          const { data: insertedItems } = await supabase
-            .from("menu_items")
-            .insert(dishInserts)
-            .select();
-
-          if (insertedItems && insertedItems.length > 0) {
-            loadedItems = insertedItems as DatabaseMenuItem[];
-          } else if (loadedItems.length === 0) {
-            loadedItems = defaultItems;
-          }
-        } catch {
-          if (loadedCategories.length === 0) loadedCategories = defaultCategories;
-          if (loadedItems.length === 0) loadedItems = defaultItems;
-        }
-      } else if (catRes.error || itemRes.error) {
-        // Fallback to local snapshot or defaults for whichever table errored
-        const cached = getLocalMenuSnapshot();
-        if (catRes.error) {
-          if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-            loadedCategories = cached.categories;
-          } else {
-            loadedCategories = defaultCategories;
-          }
-        }
-        if (itemRes.error) {
-          if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
-            loadedItems = cached.items;
-          } else {
-            loadedItems = defaultItems;
-          }
-        }
-      }
-
-      if (loadedCategories.length === 0) {
+      // If Supabase tables have errors, fallback to local cached snapshot
+      if (catRes.error) {
         const cached = getLocalMenuSnapshot();
         if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
           loadedCategories = cached.categories;
-        } else {
-          loadedCategories = defaultCategories;
         }
       }
-      if (loadedItems.length === 0) {
+
+      if (itemRes.error) {
         const cached = getLocalMenuSnapshot();
         if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
           loadedItems = cached.items;
         } else {
           loadedItems = defaultItems;
         }
-      }
-
-      if (loadedCategories.length === 0) {
-        loadedCategories = defaultCategories;
-      }
-      if (loadedItems.length === 0) {
-        loadedItems = defaultItems;
       }
 
       setCategories(loadedCategories);
@@ -410,9 +305,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         setItems(cached.items || []);
         saveLocalMenuSnapshot(cached.categories, cached.items || []);
       } else {
-        setCategories(defaultCategories);
         setItems(defaultItems);
-        saveLocalMenuSnapshot(defaultCategories, defaultItems);
       }
       setHasInitialLoaded(true);
     } finally {
@@ -476,7 +369,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       try {
         realtimeChannel = supabase
           .channel("admin-menu-realtime")
-          .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () =>
+          .on("postgres_changes", { event: "*", schema: "public", table: "menu_categories" }, () =>
             loadData(),
           )
           .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>
@@ -557,12 +450,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         let { error } = await supabase
-          .from("categories")
+          .from("menu_categories")
           .update({ available: nextVal })
           .eq("id", cat.id);
         if (error || cat.id.startsWith("cat-")) {
           const slugRes = await supabase
-            .from("categories")
+            .from("menu_categories")
             .update({ available: nextVal })
             .eq("slug", cat.slug);
           if (!slugRes.error) error = null;
@@ -639,11 +532,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         const { error: catErr } = await supabase
-          .from("categories")
+          .from("menu_categories")
           .update({ deleted_at: now })
           .eq("id", cat.id);
         if (catErr || cat.id.startsWith("cat-")) {
-          await supabase.from("categories").update({ deleted_at: now }).eq("slug", cat.slug);
+          await supabase.from("menu_categories").update({ deleted_at: now }).eq("slug", cat.slug);
         }
 
         if (associatedItems.length > 0) {
@@ -706,11 +599,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         const { error } = await supabase
-          .from("categories")
+          .from("menu_categories")
           .update({ deleted_at: null })
           .eq("id", cat.id);
         if (error || cat.id.startsWith("cat-")) {
-          await supabase.from("categories").update({ deleted_at: null }).eq("slug", cat.slug);
+          await supabase.from("menu_categories").update({ deleted_at: null }).eq("slug", cat.slug);
         }
 
         await supabase
@@ -761,9 +654,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
-        const { error } = await supabase.from("categories").delete().eq("id", cat.id);
+        const { error } = await supabase.from("menu_categories").delete().eq("id", cat.id);
         if (error || cat.id.startsWith("cat-")) {
-          await supabase.from("categories").delete().eq("slug", cat.slug);
+          await supabase.from("menu_categories").delete().eq("slug", cat.slug);
         }
       } catch (err: unknown) {
         console.warn("Could not sync permanent delete category to Supabase:", err);
@@ -788,7 +681,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         }
 
         // Hard delete trashed categories
-        await supabase.from("categories").delete().not("deleted_at", "is", null);
+        await supabase.from("menu_categories").delete().not("deleted_at", "is", null);
       } catch (err: unknown) {
         console.warn("Could not sync empty trash to Supabase:", err);
       }
@@ -1012,16 +905,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         const dbPayload = {
           name: data.name,
           slug: data.slug,
-          sort_order: data.sort_order,
-          available: data.available,
+          sort_order: Number(data.sort_order),
+          available: data.available !== false,
         };
 
         if (isEditing) {
           let updatedInDb = false;
 
-          if (data.id) {
+          if (data.id && isUUIDFormat(data.id)) {
             const { data: resData, error: err } = await supabase
-              .from("categories")
+              .from("menu_categories")
               .update(dbPayload)
               .eq("id", data.id)
               .select();
@@ -1030,11 +923,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             }
           }
 
-          if (!updatedInDb && existingCat?.slug) {
+          if (!updatedInDb && (existingCat?.slug || data.slug)) {
+            const targetSlug = existingCat?.slug || data.slug;
             const { data: resData, error: errBySlug } = await supabase
-              .from("categories")
+              .from("menu_categories")
               .update(dbPayload)
-              .eq("slug", existingCat.slug)
+              .eq("slug", targetSlug)
               .select();
             if (!errBySlug && resData && resData.length > 0) {
               updatedInDb = true;
@@ -1048,29 +942,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           }
 
           if (!updatedInDb) {
-            const { data: resData, error: errBySlug } = await supabase
-              .from("categories")
-              .update(dbPayload)
-              .eq("slug", data.slug)
-              .select();
-            if (!errBySlug && resData && resData.length > 0) {
-              updatedInDb = true;
-              if (resData[0]?.id) {
-                const realDbId = resData[0].id;
-                newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
-                setCategories(newCats);
-                saveLocalMenuSnapshot(newCats, newItems);
-              }
-            }
-          }
-
-          if (!updatedInDb) {
-            const { data: inserted } = await supabase
-              .from("categories")
+            const { data: inserted, error: insertErr } = await supabase
+              .from("menu_categories")
               .insert(dbPayload)
               .select()
               .single();
-            if (inserted?.id) {
+            if (insertErr) {
+              console.error("Supabase category insert fallback error:", insertErr);
+            } else if (inserted?.id) {
               const realDbId = inserted.id;
               newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
               setCategories(newCats);
@@ -1078,13 +957,24 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             }
           }
         } else {
-          const { data: inserted } = await supabase
-            .from("categories")
+          const { data: inserted, error: insertErr } = await supabase
+            .from("menu_categories")
             .insert(dbPayload)
             .select()
             .single();
-          if (inserted?.id) {
-            const finalCats = newCats.map((c) => (c.id === catId ? { ...c, id: inserted.id } : c));
+          if (insertErr) {
+            console.error("Supabase category insert error:", insertErr);
+            toast.error(insertErr.message || "Failed to save category to Supabase");
+          } else if (inserted?.id) {
+            const finalCats = newCats.map((c) =>
+              c.id === catId
+                ? {
+                    ...c,
+                    id: inserted.id,
+                    created_at: inserted.created_at || now,
+                  }
+                : c,
+            );
             setCategories(finalCats);
             saveLocalMenuSnapshot(finalCats, newItems);
           }
@@ -1317,7 +1207,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                   Supabase Database Setup Required
                 </p>
                 <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
-                  The <code className="text-foreground">categories</code> and{" "}
+                  The <code className="text-foreground">menu_categories</code> and{" "}
                   <code className="text-foreground">menu_items</code> tables need to be created in
                   your Supabase project.
                 </p>

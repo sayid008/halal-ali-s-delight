@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase, type DatabaseCategory } from "@/lib/supabase";
+import type { DatabaseCategory } from "@/lib/supabase";
 import {
   Dialog,
   DialogContent,

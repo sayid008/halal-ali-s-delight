@@ -133,7 +133,12 @@ export function usePublicMenu() {
     if (isSupabaseConfigured) {
       try {
         const [catRes, itemRes] = await Promise.all([
-          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+          supabase
+            .from("menu_categories")
+            .select("*")
+            .is("deleted_at", null)
+            .eq("available", true)
+            .order("sort_order", { ascending: true }),
           supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
         ]);
 
@@ -272,7 +277,7 @@ export function usePublicMenu() {
       try {
         realtimeChannel = supabase
           .channel("public-menu-realtime")
-          .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () =>
+          .on("postgres_changes", { event: "*", schema: "public", table: "menu_categories" }, () =>
             fetchMenu(),
           )
           .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>
