@@ -712,6 +712,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const itemId = data.id || `dish_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date().toISOString();
 
+    const existingItem = items.find((i) => i.id === data.id);
+
     const updatedItem: DatabaseMenuItem = {
       id: itemId,
       name: data.name,
@@ -721,7 +723,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       image_url: data.image_url,
       available: data.available,
       sort_order: data.sort_order || (items.length + 1) * 10,
-      created_at: now,
+      created_at: existingItem?.created_at || now,
       deleted_at: null,
     };
 
@@ -770,20 +772,63 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
         if (isEditing) {
           let updatedInDb = false;
-          if (data.id && isUUIDFormat(data.id)) {
-            const { error: err } = await supabase
+
+          if (data.id) {
+            const { data: resData, error: err } = await supabase
               .from("menu_items")
               .update(dbPayload)
-              .eq("id", data.id);
-            if (!err) updatedInDb = true;
+              .eq("id", data.id)
+              .select();
+            if (!err && resData && resData.length > 0) {
+              updatedInDb = true;
+            }
           }
-          if (!updatedInDb) {
-            const { error: errByName } = await supabase
+
+          if (!updatedInDb && existingItem?.name) {
+            const { data: resData, error: errByName } = await supabase
               .from("menu_items")
               .update(dbPayload)
-              .eq("name", data.name);
-            if (errByName) {
-              await supabase.from("menu_items").upsert(dbPayload, { onConflict: "name" });
+              .eq("name", existingItem.name)
+              .select();
+            if (!errByName && resData && resData.length > 0) {
+              updatedInDb = true;
+              if (resData[0]?.id) {
+                const realDbId = resData[0].id;
+                newItems = newItems.map((i) => (i.id === itemId ? { ...i, id: realDbId } : i));
+                setItems(newItems);
+                saveLocalMenuSnapshot(categories, newItems);
+              }
+            }
+          }
+
+          if (!updatedInDb) {
+            const { data: resData, error: errByName } = await supabase
+              .from("menu_items")
+              .update(dbPayload)
+              .eq("name", data.name)
+              .select();
+            if (!errByName && resData && resData.length > 0) {
+              updatedInDb = true;
+              if (resData[0]?.id) {
+                const realDbId = resData[0].id;
+                newItems = newItems.map((i) => (i.id === itemId ? { ...i, id: realDbId } : i));
+                setItems(newItems);
+                saveLocalMenuSnapshot(categories, newItems);
+              }
+            }
+          }
+
+          if (!updatedInDb) {
+            const { data: inserted } = await supabase
+              .from("menu_items")
+              .insert(dbPayload)
+              .select()
+              .single();
+            if (inserted?.id) {
+              const realDbId = inserted.id;
+              newItems = newItems.map((i) => (i.id === itemId ? { ...i, id: realDbId } : i));
+              setItems(newItems);
+              saveLocalMenuSnapshot(categories, newItems);
             }
           }
         } else {
@@ -818,27 +863,28 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const catId = data.id || `cat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date().toISOString();
 
+    const existingCat = categories.find((c) => c.id === data.id);
+
     const updatedCat: DatabaseCategory = {
       id: catId,
       name: data.name,
       slug: data.slug,
       sort_order: data.sort_order || (categories.length + 1) * 10,
       available: data.available,
-      created_at: now,
+      created_at: existingCat?.created_at || now,
       deleted_at: null,
     };
 
     let newCats: DatabaseCategory[];
     let newItems = items;
     if (isEditing) {
-      const oldCat = categories.find((c) => c.id === data.id);
       newCats = categories.map((c) => (c.id === data.id ? { ...c, ...updatedCat } : c));
-      if (oldCat && (oldCat.slug !== data.slug || oldCat.id !== catId)) {
+      if (existingCat && (existingCat.slug !== data.slug || existingCat.id !== catId)) {
         newItems = items.map((i) => {
           if (
-            i.category_id === oldCat.id ||
-            i.category_id === oldCat.slug ||
-            i.category_id === `cat-${oldCat.slug}`
+            i.category_id === existingCat.id ||
+            i.category_id === existingCat.slug ||
+            i.category_id === `cat-${existingCat.slug}`
           ) {
             return { ...i, category_id: catId };
           }
@@ -874,20 +920,63 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
         if (isEditing) {
           let updatedInDb = false;
-          if (data.id && isUUIDFormat(data.id)) {
-            const { error: err } = await supabase
+
+          if (data.id) {
+            const { data: resData, error: err } = await supabase
               .from("categories")
               .update(dbPayload)
-              .eq("id", data.id);
-            if (!err) updatedInDb = true;
+              .eq("id", data.id)
+              .select();
+            if (!err && resData && resData.length > 0) {
+              updatedInDb = true;
+            }
           }
-          if (!updatedInDb) {
-            const { error: errBySlug } = await supabase
+
+          if (!updatedInDb && existingCat?.slug) {
+            const { data: resData, error: errBySlug } = await supabase
               .from("categories")
               .update(dbPayload)
-              .eq("slug", data.slug);
-            if (errBySlug) {
-              await supabase.from("categories").upsert(dbPayload, { onConflict: "slug" });
+              .eq("slug", existingCat.slug)
+              .select();
+            if (!errBySlug && resData && resData.length > 0) {
+              updatedInDb = true;
+              if (resData[0]?.id) {
+                const realDbId = resData[0].id;
+                newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
+                setCategories(newCats);
+                saveLocalMenuSnapshot(newCats, newItems);
+              }
+            }
+          }
+
+          if (!updatedInDb) {
+            const { data: resData, error: errBySlug } = await supabase
+              .from("categories")
+              .update(dbPayload)
+              .eq("slug", data.slug)
+              .select();
+            if (!errBySlug && resData && resData.length > 0) {
+              updatedInDb = true;
+              if (resData[0]?.id) {
+                const realDbId = resData[0].id;
+                newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
+                setCategories(newCats);
+                saveLocalMenuSnapshot(newCats, newItems);
+              }
+            }
+          }
+
+          if (!updatedInDb) {
+            const { data: inserted } = await supabase
+              .from("categories")
+              .insert(dbPayload)
+              .select()
+              .single();
+            if (inserted?.id) {
+              const realDbId = inserted.id;
+              newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
+              setCategories(newCats);
+              saveLocalMenuSnapshot(newCats, newItems);
             }
           }
         } else {
@@ -899,7 +988,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           if (inserted?.id) {
             const finalCats = newCats.map((c) => (c.id === catId ? { ...c, id: inserted.id } : c));
             setCategories(finalCats);
-            saveLocalMenuSnapshot(finalCats, items);
+            saveLocalMenuSnapshot(finalCats, newItems);
           }
         }
       } catch (dbErr) {
