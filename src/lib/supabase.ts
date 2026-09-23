@@ -153,3 +153,52 @@ export function formatPrice(price: number | string): string {
   if (isNaN(num)) return "₹0";
   return `₹${num % 1 === 0 ? num.toLocaleString("en-IN") : num.toFixed(2)}`;
 }
+
+/**
+ * Verifies if the authenticated user is an authorized admin using
+ * the existing public.is_admin() function or the public.admin_users table.
+ */
+export async function verifyIsAdmin(userId?: string | null): Promise<boolean> {
+  // 1. Check existing public.is_admin() RPC function
+  try {
+    const { data: isRpcAdmin, error: rpcErr } = await supabase.rpc("is_admin");
+    if (!rpcErr && isRpcAdmin === true) {
+      return true;
+    }
+  } catch (err) {
+    console.warn("RPC is_admin check failed:", err);
+  }
+
+  // 2. Check public.admin_users table by user_id
+  if (userId) {
+    try {
+      const { data: adminRecord, error: tableErr } = await supabase
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (!tableErr && adminRecord) {
+        return true;
+      }
+    } catch (err) {
+      console.warn("admin_users table user_id check failed:", err);
+    }
+
+    try {
+      const { data: fallbackRecord, error: fallbackErr } = await supabase
+        .from("admin_users")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (!fallbackErr && fallbackRecord) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return false;
+}

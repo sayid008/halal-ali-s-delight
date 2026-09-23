@@ -1,7 +1,7 @@
 import React, { useEffect, useState, Component, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import type { Session } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { supabase, verifyIsAdmin } from "@/lib/supabase";
 import { AdminAuth } from "@/components/admin/admin-auth";
 import { AdminPanel } from "@/components/admin/admin-panel";
 import { Toaster } from "@/components/ui/sonner";
@@ -82,14 +82,10 @@ function AdminPage() {
       }
 
       try {
-        const { data: adminRecord, error: adminErr } = await supabase
-          .from("admin_users")
-          .select("id")
-          .eq("id", sbSession.user.id)
-          .maybeSingle();
+        const isAuthorized = await verifyIsAdmin(sbSession.user.id);
 
         if (mounted) {
-          if (!adminErr && adminRecord) {
+          if (isAuthorized) {
             setSession(sbSession);
           } else {
             await supabase.auth.signOut();

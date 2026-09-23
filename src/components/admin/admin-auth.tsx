@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, verifyIsAdmin } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,16 +50,25 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
         return;
       }
 
-      // 2. Verify that authenticated user's UUID exists in public.admin_users
-      const { data: adminRecord, error: adminErr } = await supabase
-        .from("admin_users")
-        .select("id")
-        .eq("id", authData.user.id)
-        .maybeSingle();
+      // Ensure the login session is established in the Supabase client
+      if (authData.session) {
+        await supabase.auth.setSession({
+          access_token: authData.session.access_token,
+          refresh_token: authData.session.refresh_token,
+        });
+      }
 
-      if (adminErr || !adminRecord) {
+      // Get authenticated session and user from Supabase
+      const { data: sessionData } = await supabase.auth.getSession();
+      const establishedSession = sessionData?.session || authData.session;
+      const establishedUser = establishedSession?.user || authData.user;
+
+      // 2. Verify admin using existing public.is_admin() function or public.admin_users table
+      const isAuthorized = await verifyIsAdmin(establishedUser.id);
+
+      if (!isAuthorized) {
         await supabase.auth.signOut();
-        const errMsg = "Unauthorized admin account";
+        const errMsg = "Unauthorized login account";
         setError(errMsg);
         toast.error(errMsg);
         setLoading(false);
@@ -68,7 +77,7 @@ export function AdminAuth({ onAuthSuccess }: AdminAuthProps) {
 
       // 3. Only then allow access to the admin panel
       toast.success("Welcome back!");
-      onAuthSuccess(authData.session);
+      onAuthSuccess(establishedSession);
     } catch (err: unknown) {
       console.error("Auth error:", err);
       const message =
