@@ -1,0 +1,42 @@
+{
+  "id": "offer-default-1",
+  "badge": "Special Combo Offer",
+  "title": "Royal Feast Special Combo",
+  "description": "Includes Royal Lamb Biryani, 2x Flame-Grilled Lamb Seekh Kebabs, Butter Naan & Cooling Mint Raita.",
+  "price": 499,
+  "original_price": 650,
+  "image_url": "/dishes/hero-biryani.jpg",
+  "available": true,
+  "show_overlay": true,
+  "autoplay": true,
+  "updated_at": "2026-09-24T00:40:00.000Z",
+  "slides": [
+    {
+      "id": "slide-1",
+      "badge": "Special Combo Offer",
+      "title": "Royal Feast Special Combo",
+      "description": "Includes Royal Lamb Biryani, 2x Flame-Grilled Lamb Seekh Kebabs, Butter Naan & Cooling Mint Raita.",
+      "price": 499,
+      "original_price": 650,
+      "image_url": "/dishes/hero-biryani.jpg"
+    },
+    {
+      "id": "slide-2",
+      "badge": "Grill Special Deal",
+      "title": "Charcoal Mixed Grill Platter",
+      "description": "Sizzling platter of marinated lamb chops, tender chicken tikka, seekh kebabs, garlic naan & mint chutney.",
+      "price": 599,
+      "original_price": 750,
+      "image_url": "/dishes/dish-mixed-grill.jpg"
+    },
+    {
+      "id": "slide-3",
+      "badge": "Chef's Recommendation",
+      "title": "Delhi Butter Chicken Combo",
+      "description": "Creamy butter chicken slow-simmered in aromatic spices with 2x garlic butter naans & jeera pilau.",
+      "price": 449,
+      "original_price": 550,
+      "image_url": "/dishes/dish-butter-chicken.jpg"
+    }
+  ]
+}

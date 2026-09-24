@@ -325,13 +325,7 @@ function readDb(): MenuDbData {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      if (
-        parsed &&
-        Array.isArray(parsed.categories) &&
-        parsed.categories.length > 0 &&
-        Array.isArray(parsed.items) &&
-        parsed.items.length > 0
-      ) {
+      if (parsed && Array.isArray(parsed.categories) && Array.isArray(parsed.items)) {
         return parsed as MenuDbData;
       }
     }
@@ -377,7 +371,55 @@ function readOfferDb() {
   } catch (e) {
     console.error("Failed to read special-offer-db.json:", e);
   }
-  return null;
+
+  const defaultOffer = {
+    id: "offer-default-1",
+    badge: "Special Combo Offer",
+    title: "Royal Feast Special Combo",
+    description:
+      "Includes Royal Lamb Biryani, 2x Flame-Grilled Lamb Seekh Kebabs, Butter Naan & Cooling Mint Raita.",
+    price: 499,
+    original_price: 650,
+    image_url: "/dishes/hero-biryani.jpg",
+    available: true,
+    show_overlay: true,
+    autoplay: true,
+    updated_at: new Date().toISOString(),
+    slides: [
+      {
+        id: "slide-1",
+        badge: "Special Combo Offer",
+        title: "Royal Feast Special Combo",
+        description:
+          "Includes Royal Lamb Biryani, 2x Flame-Grilled Lamb Seekh Kebabs, Butter Naan & Cooling Mint Raita.",
+        price: 499,
+        original_price: 650,
+        image_url: "/dishes/hero-biryani.jpg",
+      },
+      {
+        id: "slide-2",
+        badge: "Grill Special Deal",
+        title: "Charcoal Mixed Grill Platter",
+        description:
+          "Sizzling platter of marinated lamb chops, tender chicken tikka, seekh kebabs, garlic naan & mint chutney.",
+        price: 599,
+        original_price: 750,
+        image_url: "/dishes/dish-mixed-grill.jpg",
+      },
+      {
+        id: "slide-3",
+        badge: "Chef's Recommendation",
+        title: "Delhi Butter Chicken Combo",
+        description:
+          "Creamy butter chicken slow-simmered in aromatic spices with 2x garlic butter naans & jeera pilau.",
+        price: 449,
+        original_price: 550,
+        image_url: "/dishes/dish-butter-chicken.jpg",
+      },
+    ],
+  };
+  writeOfferDb(defaultOffer);
+  return defaultOffer;
 }
 
 function writeOfferDb(offer: unknown) {

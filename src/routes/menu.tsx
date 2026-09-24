@@ -3,10 +3,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { MenuItemRow } from "@/components/menu-item-row";
-import { restaurant, menuSections as staticSections } from "@/data/menu";
+import { restaurant } from "@/data/menu";
 import { usePublicMenu } from "@/hooks/use-public-menu";
+import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 import { isShopCategory } from "@/lib/supabase";
-import { Loader2 } from "lucide-react";
+import { Loader2, UtensilsCrossed } from "lucide-react";
 
 const title = "Menu — Halal Ali Dine Inn & Take Away";
 const description =
@@ -32,32 +33,29 @@ function MenuPage() {
   const isClickScrollingRef = useRef(false);
   const clickTimeoutRef = useRef<number | null>(null);
 
-  // Memoize sections so references remain stable across re-renders
+  // ONLY display categories and dishes present in the persistent database
   const displaySections = useMemo(() => {
-    return sections.length > 0
-      ? sections.map((s) => ({
-          id: s.id,
-          title: s.title,
-          items: s.items.map((item) => ({
-            name: item.name,
-            description: item.description,
-            price: item.price,
-            image: item.image_url ?? undefined,
-          })),
-        }))
-      : staticSections.map((s) => ({
-          id: s.id,
-          title: s.title,
-          items: s.items,
-        }));
+    return sections.map((s) => ({
+      id: s.id,
+      title: s.title,
+      items: s.items.map((item) => ({
+        name: item.name,
+        description: item.description,
+        price: item.price,
+        image: item.image_url ?? undefined,
+      })),
+    }));
   }, [sections]);
 
   const [activeCategory, setActiveCategory] = useState<string>(displaySections[0]?.id || "");
 
-  // Update activeCategory default when sections load
+  // Update activeCategory default when sections load or if active category was removed
   useEffect(() => {
-    if (displaySections.length > 0 && !activeCategory) {
-      setActiveCategory(displaySections[0].id);
+    if (displaySections.length > 0) {
+      const exists = displaySections.some((s) => s.id === activeCategory);
+      if (!exists) {
+        setActiveCategory(displaySections[0].id);
+      }
     }
   }, [displaySections, activeCategory]);
 
@@ -171,79 +169,98 @@ function MenuPage() {
           milder or hotter to taste.
         </p>
 
-        {loading && (
-          <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            Loading menu...
+        {/* Database Special Offer Banner (renders if active in database) */}
+        <div className="my-6">
+          <SpecialOfferHeroBanner />
+        </div>
+
+        {loading && displaySections.length === 0 && (
+          <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground justify-center">
+            <Loader2 className="size-5 animate-spin text-primary" />
+            <span>Loading menu from database...</span>
+          </div>
+        )}
+
+        {!loading && displaySections.length === 0 && (
+          <div className="my-12 rounded-2xl border border-dashed border-border/80 p-8 text-center">
+            <UtensilsCrossed className="mx-auto size-8 text-muted-foreground/60 mb-2" />
+            <h3 className="font-serif text-lg font-bold text-foreground">Menu Empty</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              No menu items currently found in the database. Please add dishes from the Admin Panel.
+            </p>
           </div>
         )}
 
         {/* Floatable / Sticky Category Navigation Bar */}
-        <div className="sticky top-[57px] sm:top-[65px] z-40 -mx-6 mt-6 border-b border-border/80 bg-background/98 px-6 py-2.5 shadow-xs transition-shadow">
-          <div
-            ref={categoryBarRef}
-            className="no-scrollbar flex items-center gap-2 overflow-x-auto touch-pan-x scroll-smooth py-0.5"
-            role="tablist"
-            aria-label="Menu categories"
-          >
-            {displaySections.map((section) => {
-              const isActive = activeCategory === section.id;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  data-category-id={section.id}
-                  onClick={() => handleCategoryClick(section.id)}
-                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-xs sm:text-sm font-semibold transition-all duration-200 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
-                    isActive
-                      ? "bg-gold text-gold-foreground shadow-sm ring-1 ring-gold"
-                      : "border border-border bg-card/80 text-foreground/75 hover:bg-card hover:text-foreground"
-                  }`}
-                >
-                  <span>{section.title}</span>
-                  {section.items.length > 0 && (
-                    <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                        isActive
-                          ? "bg-black/20 text-gold-foreground"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {section.items.length}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+        {displaySections.length > 0 && (
+          <div className="sticky top-[57px] sm:top-[65px] z-40 -mx-6 mt-6 border-b border-border/80 bg-background/98 px-6 py-2.5 shadow-xs transition-shadow">
+            <div
+              ref={categoryBarRef}
+              className="no-scrollbar flex items-center gap-2 overflow-x-auto touch-pan-x scroll-smooth py-0.5"
+              role="tablist"
+              aria-label="Menu categories"
+            >
+              {displaySections.map((section) => {
+                const isActive = activeCategory === section.id;
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    data-category-id={section.id}
+                    onClick={() => handleCategoryClick(section.id)}
+                    className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-xs sm:text-sm font-semibold transition-all duration-200 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
+                      isActive
+                        ? "bg-gold text-gold-foreground shadow-sm ring-1 ring-gold"
+                        : "border border-border bg-card/80 text-foreground/75 hover:bg-card hover:text-foreground"
+                    }`}
+                  >
+                    <span>{section.title}</span>
+                    {section.items.length > 0 && (
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                          isActive
+                            ? "bg-black/20 text-gold-foreground"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {section.items.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Menu Sections with Scroll Margin */}
-        <div className="mt-8 space-y-12">
-          {displaySections.map((section) => (
-            <section key={section.id} id={section.id} className="scroll-mt-36 space-y-6">
-              <div className="flex items-baseline justify-between border-b border-border/60 pb-2">
-                <h2 className="font-serif text-2xl font-bold text-foreground">{section.title}</h2>
-                <span className="text-xs font-medium text-muted-foreground">
-                  {section.items.length} {section.items.length === 1 ? "dish" : "dishes"}
-                </span>
-              </div>
-              <div className="space-y-6">
-                {section.items.length > 0 ? (
-                  section.items.map((item) => <MenuItemRow key={item.name} item={item} />)
-                ) : (
-                  <p className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
-                    {isShopCategory({ name: section.title, slug: section.id })
-                      ? "Shop items coming soon. Enjoy our freshly prepared kitchen menu above."
-                      : "No dishes added to this section yet."}
-                  </p>
-                )}
-              </div>
-            </section>
-          ))}
-        </div>
+        {displaySections.length > 0 && (
+          <div className="mt-8 space-y-12">
+            {displaySections.map((section) => (
+              <section key={section.id} id={section.id} className="scroll-mt-36 space-y-6">
+                <div className="flex items-baseline justify-between border-b border-border/60 pb-2">
+                  <h2 className="font-serif text-2xl font-bold text-foreground">{section.title}</h2>
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {section.items.length} {section.items.length === 1 ? "dish" : "dishes"}
+                  </span>
+                </div>
+                <div className="space-y-6">
+                  {section.items.length > 0 ? (
+                    section.items.map((item) => <MenuItemRow key={item.name} item={item} />)
+                  ) : (
+                    <p className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+                      {isShopCategory({ name: section.title, slug: section.id })
+                        ? "Shop items coming soon. Enjoy our freshly prepared kitchen menu above."
+                        : "No dishes added to this section yet."}
+                    </p>
+                  )}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
 
         <div className="mt-12 rounded-2xl bg-primary p-6 text-primary-foreground">
           <p className="font-serif text-xl">Ordering take away?</p>

@@ -16,10 +16,10 @@ function isStorageAvailable(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-export function saveLocalMenuSnapshot(
-  categories: DatabaseCategory[],
-  items: DatabaseMenuItem[],
-): void {
+/**
+ * Cache categories and items directly in local storage without triggering POST requests or loops.
+ */
+export function cacheLocalMenu(categories: DatabaseCategory[], items: DatabaseMenuItem[]): void {
   if (isStorageAvailable()) {
     try {
       window.localStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(categories));
@@ -28,6 +28,13 @@ export function saveLocalMenuSnapshot(
       console.warn("Failed to write menu cache to localStorage:", e);
     }
   }
+}
+
+export function saveLocalMenuSnapshot(
+  categories: DatabaseCategory[],
+  items: DatabaseMenuItem[],
+): void {
+  cacheLocalMenu(categories, items);
 
   if (typeof fetch !== "undefined") {
     fetch("/api/menu", {
@@ -55,6 +62,29 @@ export function saveLocalMenuSnapshot(
       }
     }
   }
+}
+
+/**
+ * Explicit helper to save any changes made in admin panel to persistent database & trigger UI updates
+ */
+export async function saveAdminMenuChangesToDatabase(
+  categories: DatabaseCategory[],
+  items: DatabaseMenuItem[],
+): Promise<boolean> {
+  saveLocalMenuSnapshot(categories, items);
+  if (typeof fetch !== "undefined") {
+    try {
+      const res = await fetch("/api/menu", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ categories, items }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function getLocalMenuSnapshot(): {
@@ -152,23 +182,33 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
         Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
 
       for (const cat of updated) {
-        if (cat.id && isUUID(cat.id)) {
-          const { error } = await supabase
-            .from("menu_categories")
-            .update({ sort_order: cat.sort_order })
-            .eq("id", cat.id);
+        const payload = {
+          name: cat.name,
+          slug: cat.slug || cat.id,
+          sort_order: cat.sort_order,
+          available: cat.available !== false,
+        };
 
-          if (error && cat.slug) {
-            await supabase
-              .from("menu_categories")
-              .update({ sort_order: cat.sort_order })
-              .eq("slug", cat.slug);
+        if (cat.id && isUUID(cat.id)) {
+          const { data: res } = await supabase
+            .from("categories")
+            .update({ sort_order: cat.sort_order })
+            .eq("id", cat.id)
+            .select();
+
+          if (!res || res.length === 0) {
+            await supabase.from("categories").upsert({ ...payload, id: cat.id });
           }
         } else if (cat.slug) {
-          await supabase
-            .from("menu_categories")
+          const { data: res } = await supabase
+            .from("categories")
             .update({ sort_order: cat.sort_order })
-            .eq("slug", cat.slug);
+            .eq("slug", cat.slug)
+            .select();
+
+          if (!res || res.length === 0) {
+            await supabase.from("categories").upsert(payload, { onConflict: "slug" });
+          }
         }
       }
     } catch (err) {

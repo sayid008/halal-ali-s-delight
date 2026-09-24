@@ -851,8 +851,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Empty Entire Trash
   async function handleEmptyTrash() {
-    setItems((prev) => prev.filter((i) => !i.deleted_at));
-    setCategories((prev) => prev.filter((c) => !c.deleted_at));
+    const remainingItems = items.filter((i) => !i.deleted_at);
+    const remainingCats = categories.filter((c) => !c.deleted_at);
+    setItems(remainingItems);
+    setCategories(remainingCats);
+    saveLocalMenuSnapshot(remainingCats, remainingItems);
     toast.success("Trash emptied permanently");
 
     if (isSupabaseConfigured) {

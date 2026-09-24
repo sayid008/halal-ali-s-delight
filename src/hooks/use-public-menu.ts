@@ -7,18 +7,15 @@ import {
   type MenuSectionWithItems,
   isShopCategory,
 } from "@/lib/supabase";
-import { menuSections as staticSections } from "@/data/menu";
-import {
-  applyOrderToStaticSections,
-  getLocalMenuSnapshot,
-  MENU_ORDER_EVENT,
-} from "@/lib/menu-order";
+import { getLocalMenuSnapshot, cacheLocalMenu, MENU_ORDER_EVENT } from "@/lib/menu-order";
 
 function buildSectionsFromData(
   rawCategories: DatabaseCategory[],
   rawItems: DatabaseMenuItem[],
 ): MenuSectionWithItems[] {
+  // Only databased categories that are not deleted and marked available
   const categories = rawCategories.filter((c) => !c.deleted_at && c.available !== false);
+  // Only databased items that are not deleted and marked available
   const items = rawItems.filter((i) => !i.deleted_at && i.available !== false);
 
   if (categories.length === 0) return [];
@@ -71,10 +68,9 @@ function buildSectionsFromData(
     }
   });
 
-  // Step 2: Unmatched items (null category_id, broken UUID, or unrecognized category)
+  // Step 2: Unmatched active items placed in default category so no dishes are lost
   const unmatchedItems = items.filter((item) => !matchedItemIds.has(item.id));
 
-  // Place unmatched items into the first category if available without distributing across categories
   if (unmatchedItems.length > 0 && distributionTargets.length > 0) {
     const defaultTarget = distributionTargets[0];
     const sec = sectionMap.get(defaultTarget.id);
@@ -103,33 +99,18 @@ function buildSectionsFromData(
     }
   });
 
+  // Return all active categories so admin changes reflect immediately
   return grouped;
 }
 
-function getInitialSections(): MenuSectionWithItems[] {
-  // Always initialize with raw static sections for identical SSR & client hydration
-  return staticSections.map((sec, secIdx) => ({
-    id: sec.id,
-    title: sec.title,
-    items: sec.items.map((item, itemIdx) => ({
-      id: `static-${sec.id}-${itemIdx}`,
-      name: item.name,
-      description: item.description,
-      price: typeof item.price === "number" ? item.price : 250,
-      image_url: item.image ?? null,
-      available: true,
-      sort_order: (secIdx + 1) * 100 + (itemIdx + 1),
-    })),
-  }));
-}
-
 export function usePublicMenu() {
-  const [sections, setSections] = useState<MenuSectionWithItems[]>(getInitialSections);
-  const [loading, setLoading] = useState(false);
+  // Always initialize with [] on both SSR and client for 100% consistent initial hydration
+  const [sections, setSections] = useState<MenuSectionWithItems[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {
-    // 1. Try fetching from live Supabase database first so all users see database changes immediately
+    // 1. Try fetching from live Supabase database first
     if (isSupabaseConfigured) {
       try {
         const [catRes, itemRes] = await Promise.all([
@@ -143,20 +124,7 @@ export function usePublicMenu() {
         if (dbCategories.length > 0) {
           const grouped = buildSectionsFromData(dbCategories, dbItems);
           setSections(grouped);
-          saveLocalMenuSnapshot(dbCategories, dbItems);
-          setLoading(false);
-          return;
-        } else if (dbItems.length > 0) {
-          const fallbackCats: DatabaseCategory[] = staticSections.map((sec, idx) => ({
-            id: `cat-${sec.id}`,
-            name: sec.title,
-            slug: sec.id,
-            sort_order: idx + 1,
-            created_at: new Date().toISOString(),
-          }));
-          const grouped = buildSectionsFromData(fallbackCats, dbItems);
-          setSections(grouped);
-          saveLocalMenuSnapshot(fallbackCats, dbItems);
+          cacheLocalMenu(dbCategories, dbItems);
           setLoading(false);
           return;
         }
@@ -165,7 +133,7 @@ export function usePublicMenu() {
       }
     }
 
-    // 2. Try fetching from server API database
+    // 2. Try fetching from server API database (/data/menu-db.json)
     try {
       const res = await fetch("/api/menu");
       if (res.ok) {
@@ -176,7 +144,7 @@ export function usePublicMenu() {
         if (data.categories && data.categories.length > 0) {
           const grouped = buildSectionsFromData(data.categories, data.items || []);
           setSections(grouped);
-          saveLocalMenuSnapshot(data.categories, data.items || []);
+          cacheLocalMenu(data.categories, data.items || []);
           setLoading(false);
           return;
         }
@@ -185,7 +153,7 @@ export function usePublicMenu() {
       // ignore network error
     }
 
-    // 3. Check Local Storage snapshot if Supabase and server API are offline or empty
+    // 3. Fallback to cached local snapshot of database
     const localSnapshot = getLocalMenuSnapshot();
     if (
       localSnapshot &&
@@ -198,27 +166,20 @@ export function usePublicMenu() {
       return;
     }
 
-    // 3. Final fallback to ordered static sections
-    const orderedStatic = applyOrderToStaticSections(staticSections);
-    setSections(
-      orderedStatic.map((sec, secIdx) => ({
-        id: sec.id,
-        title: sec.title,
-        items: sec.items.map((item, itemIdx) => ({
-          id: `static-${sec.id}-${itemIdx}`,
-          name: item.name,
-          description: item.description,
-          price: typeof item.price === "number" ? item.price : 250,
-          image_url: item.image ?? null,
-          available: true,
-          sort_order: (secIdx + 1) * 100 + (itemIdx + 1),
-        })),
-      })),
-    );
+    // If database is completely empty, strictly return empty (no static fallback)
+    setSections([]);
     setLoading(false);
   }, []);
 
   useEffect(() => {
+    // 1. Immediately hydrate from local database snapshot on mount (client-side only, post-hydration)
+    const local = getLocalMenuSnapshot();
+    if (local && Array.isArray(local.categories) && local.categories.length > 0) {
+      const grouped = buildSectionsFromData(local.categories, local.items || []);
+      setSections(grouped);
+      setLoading(false);
+    }
+
     fetchMenu();
 
     const handleUpdate = (e?: Event) => {

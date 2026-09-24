@@ -27,7 +27,15 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
     })),
   ];
   const visibleSections =
-    selected === "all" ? sections : sections.filter(({ id }) => id === selected);
+    selected === "all"
+      ? sections.filter((s) => s.items.length > 0)
+      : sections.filter(({ id }) => id === selected);
+
+  useEffect(() => {
+    if (selected !== "all" && !sections.some((s) => s.id === selected)) {
+      setSelected("all");
+    }
+  }, [sections, selected]);
 
   useEffect(() => {
     const updateFloatingVisibility = () => {

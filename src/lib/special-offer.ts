@@ -135,10 +135,7 @@ export function getLocalSpecialOffer(): SpecialOffer {
 export async function fetchSpecialOffer(): Promise<SpecialOffer> {
   const local = getLocalSpecialOffer();
 
-  if (!isSupabaseConfigured) {
-    return local;
-  }
-
+  // 1. Fetch from server API database (/data/special-offer-db.json)
   try {
     const res = await fetch("/api/special-offer");
     if (res.ok) {
@@ -158,53 +155,45 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
     // ignore
   }
 
-  try {
-    // Try reading from a special_offers or site_settings table
-    const { data, error } = await supabase
-      .from("special_offers")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  // 2. Fetch from Supabase if configured
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from("special_offers")
+        .select("*")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (!error && data) {
-      const remoteOffer: SpecialOffer = {
-        id: data.id,
-        badge: data.badge || DEFAULT_SPECIAL_OFFER.badge,
-        title: data.title || DEFAULT_SPECIAL_OFFER.title,
-        description: data.description || DEFAULT_SPECIAL_OFFER.description,
-        price: Number(data.price) || DEFAULT_SPECIAL_OFFER.price,
-        original_price: data.original_price ? Number(data.original_price) : undefined,
-        image_url: data.image_url || DEFAULT_SPECIAL_OFFER.image_url,
-        slides: data.slides || local.slides || DEFAULT_SLIDES,
-        available: data.available !== false,
-        show_overlay: data.show_overlay !== false,
-        autoplay: data.autoplay !== undefined ? data.autoplay : (local.autoplay ?? true),
-        updated_at: data.updated_at,
-      };
+      if (!error && data) {
+        const remoteOffer: SpecialOffer = {
+          id: data.id,
+          badge: data.badge || DEFAULT_SPECIAL_OFFER.badge,
+          title: data.title || DEFAULT_SPECIAL_OFFER.title,
+          description: data.description || DEFAULT_SPECIAL_OFFER.description,
+          price: Number(data.price) || DEFAULT_SPECIAL_OFFER.price,
+          original_price: data.original_price ? Number(data.original_price) : undefined,
+          image_url: data.image_url || DEFAULT_SPECIAL_OFFER.image_url,
+          slides: data.slides || local.slides || DEFAULT_SLIDES,
+          available: data.available !== false,
+          show_overlay: data.show_overlay !== false,
+          autoplay: data.autoplay !== undefined ? data.autoplay : (local.autoplay ?? true),
+          updated_at: data.updated_at,
+        };
 
-      // If local storage has a newer update timestamp, prefer local
-      if (local.updated_at && remoteOffer.updated_at) {
-        const localTime = new Date(local.updated_at).getTime();
-        const remoteTime = new Date(remoteOffer.updated_at).getTime();
-        if (localTime > remoteTime) {
-          return local;
+        // Cache locally
+        if (isStorageAvailable()) {
+          try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteOffer));
+          } catch (e) {
+            console.warn("Failed to cache remote offer in localStorage:", e);
+          }
         }
-      } else if (local.updated_at && !remoteOffer.updated_at) {
-        return local;
+        return remoteOffer;
       }
-      // Cache locally
-      if (isStorageAvailable()) {
-        try {
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteOffer));
-        } catch (e) {
-          console.warn("Failed to cache remote offer in localStorage:", e);
-        }
-      }
-      return remoteOffer;
+    } catch (err) {
+      console.warn("Could not fetch remote special offer from Supabase:", err);
     }
-  } catch (err) {
-    console.warn("Could not fetch remote special offer:", err);
   }
 
   return local;
@@ -236,9 +225,18 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
     });
   }
 
-  // Notify listeners on current window
+  // Notify listeners on current window and other tabs
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("special-offer-updated", { detail: toSave }));
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        const bc = new BroadcastChannel("halal_ali_special_offer_channel");
+        bc.postMessage(toSave);
+        bc.close();
+      } catch {
+        // ignore channel errors
+      }
+    }
   }
 
   // Persist to Supabase if configured
@@ -336,10 +334,27 @@ export function useSpecialOffer() {
     window.addEventListener("special-offer-updated", handleUpdate);
     window.addEventListener("storage", handleStorage);
 
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        bc = new BroadcastChannel("halal_ali_special_offer_channel");
+        bc.onmessage = (msgEvent) => {
+          if (msgEvent.data && typeof msgEvent.data === "object") {
+            setOffer(msgEvent.data as SpecialOffer);
+          }
+        };
+      } catch {
+        // ignore channel errors
+      }
+    }
+
     return () => {
       mounted = false;
       window.removeEventListener("special-offer-updated", handleUpdate);
       window.removeEventListener("storage", handleStorage);
+      if (bc) {
+        bc.close();
+      }
     };
   }, []);
 
