@@ -26,10 +26,19 @@ export function MenuItemRow({ item }: { item: ItemProps }) {
           <span className="font-serif text-base sm:text-lg text-gold">{item.name.charAt(0)}</span>
         </div>
       )}
-      <div className="flex flex-1 min-w-0 items-center justify-between gap-2.5">
-        <h3 className="font-medium text-xs sm:text-sm text-foreground truncate">{item.name}</h3>
-        <div className="flex-1 min-w-[20px] border-b border-dotted border-border/50" />
-        <span className="shrink-0 font-semibold text-xs sm:text-sm text-gold">{displayPrice}</span>
+      <div className="flex flex-1 min-w-0 flex-col justify-center">
+        <div className="flex items-center justify-between gap-2.5">
+          <h3 className="font-medium text-xs sm:text-sm text-foreground truncate">{item.name}</h3>
+          <div className="flex-1 min-w-[20px] border-b border-dotted border-border/50" />
+          <span className="shrink-0 font-semibold text-xs sm:text-sm text-gold">
+            {displayPrice}
+          </span>
+        </div>
+        {item.description ? (
+          <p className="text-[11px] sm:text-xs text-muted-foreground line-clamp-1 mt-0.5">
+            {item.description}
+          </p>
+        ) : null}
       </div>
     </div>
   );

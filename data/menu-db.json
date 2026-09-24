@@ -1,0 +1,276 @@
+{
+  "last_updated": "2026-09-24T00:40:00.000Z",
+  "version": 1,
+  "categories": [
+    {
+      "id": "cat-starters",
+      "name": "Starters",
+      "slug": "starters",
+      "sort_order": 1,
+      "available": true,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cat-grill",
+      "name": "Main Grill",
+      "slug": "grill",
+      "sort_order": 2,
+      "available": true,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cat-curries",
+      "name": "Curries",
+      "slug": "curries",
+      "sort_order": 3,
+      "available": true,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cat-biryani",
+      "name": "Biryani & Rice",
+      "slug": "biryani",
+      "sort_order": 4,
+      "available": true,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cat-breads",
+      "name": "Breads & Sides",
+      "slug": "breads",
+      "sort_order": 5,
+      "available": true,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cat-desserts",
+      "name": "Desserts & Drinks",
+      "slug": "desserts",
+      "sort_order": 6,
+      "available": true,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "items": [
+    {
+      "id": "dish-starters-1",
+      "name": "Vegetable Samosas",
+      "description": "Hand-folded pastry with spiced peas and potato, tamarind chutney.",
+      "price": 120,
+      "category_id": "cat-starters",
+      "image_url": "/dishes/dish-samosa.jpg",
+      "available": true,
+      "sort_order": 10,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-starters-2",
+      "name": "Chicken Pakora",
+      "description": "Gram flour batter, crisp fried, served with mint raita.",
+      "price": 180,
+      "category_id": "cat-starters",
+      "image_url": "/dishes/dish-chicken-pakora.jpg",
+      "available": true,
+      "sort_order": 20,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-starters-3",
+      "name": "Onion Bhaji",
+      "description": "Sweet onion, cumin and coriander, fried golden.",
+      "price": 140,
+      "category_id": "cat-starters",
+      "image_url": "/dishes/dish-onion-bhaji.jpg",
+      "available": true,
+      "sort_order": 30,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-grill-1",
+      "name": "Lamb Seekh Kebab",
+      "description": "Minced lamb infused with Ali's signature spice blend, flame-grilled.",
+      "price": 280,
+      "category_id": "cat-grill",
+      "image_url": "/dishes/dish-seekh-kebab.jpg",
+      "available": true,
+      "sort_order": 10,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-grill-2",
+      "name": "Chicken Tikka Skewers",
+      "description": "Yoghurt and paprika marinade, charred over charcoal.",
+      "price": 320,
+      "category_id": "cat-grill",
+      "image_url": "/dishes/dish-chicken-tikka-skewers.jpg",
+      "available": true,
+      "sort_order": 20,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-grill-3",
+      "name": "Mixed Grill Platter",
+      "description": "Seekh kebab, chicken tikka, lamb chop and grilled wings for two.",
+      "price": 650,
+      "category_id": "cat-grill",
+      "image_url": "/dishes/dish-mixed-grill.jpg",
+      "available": true,
+      "sort_order": 30,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-curries-1",
+      "name": "Classic Butter Chicken",
+      "description": "Tender tandoori chicken simmered in a rich tomato and fenugreek gravy.",
+      "price": 380,
+      "category_id": "cat-curries",
+      "image_url": "/dishes/dish-butter-chicken.jpg",
+      "available": true,
+      "sort_order": 10,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-curries-2",
+      "name": "Chicken Tikka Masala",
+      "description": "Mild, creamy masala sauce with charred chicken tikka.",
+      "price": 360,
+      "category_id": "cat-curries",
+      "image_url": "/dishes/dish-tikka-masala.jpg",
+      "available": true,
+      "sort_order": 20,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-curries-3",
+      "name": "Lamb Karahi",
+      "description": "Slow-cooked lamb with tomato, ginger and green chilli.",
+      "price": 420,
+      "category_id": "cat-curries",
+      "image_url": "/dishes/dish-lamb-karahi.jpg",
+      "available": true,
+      "sort_order": 30,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-curries-4",
+      "name": "Daal Tarka",
+      "description": "Yellow lentils finished with cumin-tempered ghee.",
+      "price": 220,
+      "category_id": "cat-curries",
+      "image_url": "/dishes/dish-daal-tarka.jpg",
+      "available": true,
+      "sort_order": 40,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-biryani-1",
+      "name": "Royal Lamb Biryani",
+      "description": "Slow-cooked lamb, long-grain basmati, saffron and fried onion.",
+      "price": 450,
+      "category_id": "cat-biryani",
+      "image_url": "/dishes/hero-biryani.jpg",
+      "available": true,
+      "sort_order": 10,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-biryani-2",
+      "name": "Chicken Biryani",
+      "description": "Layered basmati with spiced chicken and boiled egg.",
+      "price": 380,
+      "category_id": "cat-biryani",
+      "image_url": "/dishes/dish-chicken-biryani.jpg",
+      "available": true,
+      "sort_order": 20,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-biryani-3",
+      "name": "Pilau Rice",
+      "description": "Basmati steamed with whole spices.",
+      "price": 150,
+      "category_id": "cat-biryani",
+      "image_url": "/dishes/dish-pilau-rice.jpg",
+      "available": true,
+      "sort_order": 30,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-breads-1",
+      "name": "Peshwari Naan",
+      "description": "Leavened bread stuffed with sweet sultanas, almonds, and coconut.",
+      "price": 120,
+      "category_id": "cat-breads",
+      "image_url": "/dishes/dish-naan.jpg",
+      "available": true,
+      "sort_order": 10,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-breads-2",
+      "name": "Garlic Naan",
+      "description": "Fresh from the tandoor with garlic butter and coriander.",
+      "price": 90,
+      "category_id": "cat-breads",
+      "image_url": "/dishes/dish-garlic-naan.jpg",
+      "available": true,
+      "sort_order": 20,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-breads-3",
+      "name": "Mint Raita",
+      "description": "Cool yoghurt, cucumber and fresh mint.",
+      "price": 60,
+      "category_id": "cat-breads",
+      "image_url": "/dishes/dish-mint-raita.jpg",
+      "available": true,
+      "sort_order": 30,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-desserts-1",
+      "name": "Gulab Jamun",
+      "description": "Warm milk dumplings soaked in cardamom syrup.",
+      "price": 120,
+      "category_id": "cat-desserts",
+      "image_url": "/dishes/dish-gulab-jamun.jpg",
+      "available": true,
+      "sort_order": 10,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-desserts-2",
+      "name": "Kheer",
+      "description": "Slow-cooked rice pudding with pistachio.",
+      "price": 140,
+      "category_id": "cat-desserts",
+      "image_url": "/dishes/dish-kheer.jpg",
+      "available": true,
+      "sort_order": 20,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-desserts-3",
+      "name": "Mango Lassi",
+      "description": "Yoghurt blended with sweet Alphonso mango.",
+      "price": 110,
+      "category_id": "cat-desserts",
+      "image_url": "/dishes/dish-mango-lassi.jpg",
+      "available": true,
+      "sort_order": 30,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "dish-desserts-4",
+      "name": "Masala Chai",
+      "description": "Spiced black tea brewed with milk.",
+      "price": 50,
+      "category_id": "cat-desserts",
+      "image_url": "/dishes/dish-masala-chai.jpg",
+      "available": true,
+      "sort_order": 40,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

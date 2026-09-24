@@ -133,12 +133,7 @@ export function usePublicMenu() {
     if (isSupabaseConfigured) {
       try {
         const [catRes, itemRes] = await Promise.all([
-          supabase
-            .from("menu_categories")
-            .select("*")
-            .is("deleted_at", null)
-            .eq("available", true)
-            .order("sort_order", { ascending: true }),
+          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
           supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
         ]);
 
@@ -181,6 +176,7 @@ export function usePublicMenu() {
         if (data.categories && data.categories.length > 0) {
           const grouped = buildSectionsFromData(data.categories, data.items || []);
           setSections(grouped);
+          saveLocalMenuSnapshot(data.categories, data.items || []);
           setLoading(false);
           return;
         }
@@ -277,7 +273,7 @@ export function usePublicMenu() {
       try {
         realtimeChannel = supabase
           .channel("public-menu-realtime")
-          .on("postgres_changes", { event: "*", schema: "public", table: "menu_categories" }, () =>
+          .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () =>
             fetchMenu(),
           )
           .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>

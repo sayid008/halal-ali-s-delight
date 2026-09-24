@@ -24,6 +24,13 @@ import { getDaysRemaining, SUPABASE_TRASH_SQL } from "@/lib/trash";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Link } from "@tanstack/react-router";
 import {
   Plus,
@@ -43,9 +50,22 @@ import {
   Check,
   Loader2,
   Sparkles,
+  Database,
+  Save,
+  Download,
+  HardDrive,
+  RotateCcw,
+  CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { menuSections as homeSections } from "@/data/menu";
+import {
+  storeAllMenuDetailsToDatabase,
+  resetDatabaseToDefaults,
+  exportDatabaseBackup,
+  fetchDatabaseStats,
+  type DatabaseStats,
+} from "@/lib/database-menu";
 
 interface AdminPanelProps {
   session: Session | AdminUserSession | { user: { email?: string } };
@@ -107,7 +127,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
       return cached.categories;
     }
-    return [];
+    return defaultCategories;
   });
   const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
@@ -162,8 +182,66 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const [dbTableError, setDbTableError] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
 
-  async function loadData(showLoader = false) {
-    if (showLoader || (!hasInitialLoaded && items.length === 0)) {
+  // Database Storage States
+  const [savingToDb, setSavingToDb] = useState(false);
+  const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
+  const [showDbModal, setShowDbModal] = useState(false);
+  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
+
+  async function handleStoreAllToDatabase() {
+    setSavingToDb(true);
+    try {
+      const res = await storeAllMenuDetailsToDatabase(categories, items);
+      if (res.success) {
+        setLastSavedTimestamp(new Date().toLocaleTimeString());
+        toast.success(res.message, {
+          description: `All ${items.length} items across ${categories.length} categories are permanently stored in the server database (data/menu-db.json)${isSupabaseConfigured ? " and Supabase" : ""}.`,
+          duration: 4000,
+        });
+        const stats = await fetchDatabaseStats();
+        if (stats) setDbStats(stats);
+      } else {
+        toast.error("Failed to store all menu details to database");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to store to database";
+      toast.error(msg);
+    } finally {
+      setSavingToDb(false);
+    }
+  }
+
+  async function handleResetToDefaults() {
+    if (
+      !window.confirm(
+        "Re-seed database with default full menu? This will restore all 20 authentic dishes and 6 categories to the database (data/menu-db.json).",
+      )
+    ) {
+      return;
+    }
+    setSavingToDb(true);
+    try {
+      const res = await resetDatabaseToDefaults();
+      if (res && res.categories && res.items) {
+        setCategories(res.categories);
+        setItems(res.items);
+        setLastSavedTimestamp(new Date().toLocaleTimeString());
+        toast.success("Database reset and stored with full default menu!", {
+          description: `Restored ${res.items.length} dishes in ${res.categories.length} categories.`,
+        });
+        const stats = await fetchDatabaseStats();
+        if (stats) setDbStats(stats);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to reset database";
+      toast.error(msg);
+    } finally {
+      setSavingToDb(false);
+    }
+  }
+
+  async function loadData() {
+    if (items.length === 0 || categories.length === 0) {
       setLoading(true);
     }
     setDbTableError(null);
@@ -215,7 +293,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       const [catRes, itemRes] = await Promise.all([
         Promise.race([
-          supabase.from("menu_categories").select("*").order("sort_order", { ascending: true }),
+          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
           timeoutPromise,
         ]),
         Promise.race([
@@ -243,7 +321,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       if (isCatTableMissing || isItemTableMissing) {
         const missing: string[] = [];
-        if (isCatTableMissing) missing.push("'menu_categories'");
+        if (isCatTableMissing) missing.push("'categories'");
         if (isItemTableMissing) missing.push("'menu_items'");
         setDbTableError(
           `Supabase table ${missing.join(" and ")} is not created in your database yet. Copy and run the SQL below in your Supabase SQL Editor.`,
@@ -271,26 +349,131 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
       if (expiredCatIds.length > 0) {
         for (const id of expiredCatIds) {
-          supabase.from("menu_categories").delete().eq("id", id);
+          supabase.from("categories").delete().eq("id", id);
         }
         loadedCategories = loadedCategories.filter((c) => !expiredCatIds.includes(c.id));
       }
 
-      // If Supabase tables have errors, fallback to local cached snapshot
-      if (catRes.error) {
+      // If Supabase tables are completely empty on the very first initial load, seed them into the live database
+      if (
+        !hasInitialLoaded &&
+        loadedCategories.length === 0 &&
+        loadedItems.length === 0 &&
+        !catRes.error &&
+        !itemRes.error
+      ) {
+        try {
+          // Sync categories to live Supabase DB
+          const catInserts = homeSections.map((sec, idx) => ({
+            name: sec.title,
+            slug: sec.id,
+            sort_order: idx + 1,
+          }));
+
+          const { data: upsertedCats } = await supabase
+            .from("categories")
+            .upsert(catInserts, { onConflict: "slug" })
+            .select();
+
+          const catMap = new Map<string, string>();
+          if (upsertedCats && upsertedCats.length > 0) {
+            (upsertedCats as DatabaseCategory[]).forEach((c) => catMap.set(c.slug, c.id));
+            loadedCategories = upsertedCats as DatabaseCategory[];
+          } else {
+            loadedCategories = defaultCategories;
+          }
+
+          // Sync dishes to live Supabase DB
+          const dishInserts: Array<{
+            name: string;
+            description: string;
+            price: number;
+            category_id: string | null;
+            image_url: string | null;
+            available: boolean;
+            sort_order: number;
+          }> = [];
+
+          homeSections.forEach((sec, sIdx) => {
+            const catId = catMap.get(sec.id) || null;
+            sec.items.forEach((dish, dIdx) => {
+              let priceNum = 250;
+              if (typeof dish.price === "number") {
+                priceNum = dish.price < 50 ? Math.round(dish.price * 50) : dish.price;
+              } else if (typeof dish.price === "string") {
+                const parsed = parseFloat(dish.price.replace(/[^\d.]/g, ""));
+                if (!isNaN(parsed)) {
+                  priceNum = parsed < 50 ? Math.round(parsed * 50) : Math.round(parsed);
+                }
+              }
+
+              dishInserts.push({
+                name: dish.name,
+                description: dish.description,
+                price: priceNum,
+                category_id: catId,
+                image_url: dish.image || null,
+                available: true,
+                sort_order: (sIdx + 1) * 10 + (dIdx + 1),
+              });
+            });
+          });
+
+          const { data: insertedItems } = await supabase
+            .from("menu_items")
+            .insert(dishInserts)
+            .select();
+
+          if (insertedItems && insertedItems.length > 0) {
+            loadedItems = insertedItems as DatabaseMenuItem[];
+          } else if (loadedItems.length === 0) {
+            loadedItems = defaultItems;
+          }
+        } catch {
+          if (loadedCategories.length === 0) loadedCategories = defaultCategories;
+          if (loadedItems.length === 0) loadedItems = defaultItems;
+        }
+      } else if (catRes.error || itemRes.error) {
+        // Fallback to local snapshot or defaults for whichever table errored
         const cached = getLocalMenuSnapshot();
-        if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-          loadedCategories = cached.categories;
+        if (catRes.error) {
+          if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+            loadedCategories = cached.categories;
+          } else {
+            loadedCategories = defaultCategories;
+          }
+        }
+        if (itemRes.error) {
+          if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+            loadedItems = cached.items;
+          } else {
+            loadedItems = defaultItems;
+          }
         }
       }
 
-      if (itemRes.error) {
+      if (loadedCategories.length === 0) {
+        const cached = getLocalMenuSnapshot();
+        if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+          loadedCategories = cached.categories;
+        } else {
+          loadedCategories = defaultCategories;
+        }
+      }
+      if (loadedItems.length === 0) {
         const cached = getLocalMenuSnapshot();
         if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
           loadedItems = cached.items;
         } else {
           loadedItems = defaultItems;
         }
+      }
+
+      if (loadedCategories.length === 0) {
+        loadedCategories = defaultCategories;
+      }
+      if (loadedItems.length === 0) {
+        loadedItems = defaultItems;
       }
 
       setCategories(loadedCategories);
@@ -305,12 +488,13 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         setItems(cached.items || []);
         saveLocalMenuSnapshot(cached.categories, cached.items || []);
       } else {
+        setCategories(defaultCategories);
         setItems(defaultItems);
+        saveLocalMenuSnapshot(defaultCategories, defaultItems);
       }
       setHasInitialLoaded(true);
     } finally {
       setLoading(false);
-      setHasInitialLoaded(true);
     }
   }
 
@@ -320,7 +504,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const handleLocalUpdate = (e?: Event) => {
       if (e && "detail" in e && e.detail) {
         const detail = (e as CustomEvent).detail as {
-          type?: string;
           categories?: DatabaseCategory[];
           items?: DatabaseMenuItem[];
         };
@@ -330,16 +513,13 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         if (detail.items && Array.isArray(detail.items)) {
           setItems(detail.items);
         }
-        if (detail.type === "snapshot") {
-          return;
-        }
       }
-      loadData(false);
+      loadData();
     };
 
     const handleVisibilityChange = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        loadData(false);
+        loadData();
       }
     };
 
@@ -362,6 +542,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               setItems(msgEvent.data.items);
             }
           }
+          loadData();
         };
       } catch {
         // ignore channel errors
@@ -373,11 +554,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       try {
         realtimeChannel = supabase
           .channel("admin-menu-realtime")
-          .on("postgres_changes", { event: "*", schema: "public", table: "menu_categories" }, () =>
-            loadData(false),
+          .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () =>
+            loadData(),
           )
           .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>
-            loadData(false),
+            loadData(),
           )
           .subscribe();
       } catch (err) {
@@ -454,12 +635,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         let { error } = await supabase
-          .from("menu_categories")
+          .from("categories")
           .update({ available: nextVal })
           .eq("id", cat.id);
         if (error || cat.id.startsWith("cat-")) {
           const slugRes = await supabase
-            .from("menu_categories")
+            .from("categories")
             .update({ available: nextVal })
             .eq("slug", cat.slug);
           if (!slugRes.error) error = null;
@@ -536,11 +717,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         const { error: catErr } = await supabase
-          .from("menu_categories")
+          .from("categories")
           .update({ deleted_at: now })
           .eq("id", cat.id);
         if (catErr || cat.id.startsWith("cat-")) {
-          await supabase.from("menu_categories").update({ deleted_at: now }).eq("slug", cat.slug);
+          await supabase.from("categories").update({ deleted_at: now }).eq("slug", cat.slug);
         }
 
         if (associatedItems.length > 0) {
@@ -603,11 +784,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         const { error } = await supabase
-          .from("menu_categories")
+          .from("categories")
           .update({ deleted_at: null })
           .eq("id", cat.id);
         if (error || cat.id.startsWith("cat-")) {
-          await supabase.from("menu_categories").update({ deleted_at: null }).eq("slug", cat.slug);
+          await supabase.from("categories").update({ deleted_at: null }).eq("slug", cat.slug);
         }
 
         await supabase
@@ -658,9 +839,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     if (isSupabaseConfigured) {
       try {
         await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
-        const { error } = await supabase.from("menu_categories").delete().eq("id", cat.id);
+        const { error } = await supabase.from("categories").delete().eq("id", cat.id);
         if (error || cat.id.startsWith("cat-")) {
-          await supabase.from("menu_categories").delete().eq("slug", cat.slug);
+          await supabase.from("categories").delete().eq("slug", cat.slug);
         }
       } catch (err: unknown) {
         console.warn("Could not sync permanent delete category to Supabase:", err);
@@ -685,7 +866,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         }
 
         // Hard delete trashed categories
-        await supabase.from("menu_categories").delete().not("deleted_at", "is", null);
+        await supabase.from("categories").delete().not("deleted_at", "is", null);
       } catch (err: unknown) {
         console.warn("Could not sync empty trash to Supabase:", err);
       }
@@ -909,16 +1090,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         const dbPayload = {
           name: data.name,
           slug: data.slug,
-          sort_order: Number(data.sort_order),
-          available: data.available !== false,
+          sort_order: data.sort_order,
+          available: data.available,
         };
 
         if (isEditing) {
           let updatedInDb = false;
 
-          if (data.id && isUUIDFormat(data.id)) {
+          if (data.id) {
             const { data: resData, error: err } = await supabase
-              .from("menu_categories")
+              .from("categories")
               .update(dbPayload)
               .eq("id", data.id)
               .select();
@@ -927,12 +1108,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             }
           }
 
-          if (!updatedInDb && (existingCat?.slug || data.slug)) {
-            const targetSlug = existingCat?.slug || data.slug;
+          if (!updatedInDb && existingCat?.slug) {
             const { data: resData, error: errBySlug } = await supabase
-              .from("menu_categories")
+              .from("categories")
               .update(dbPayload)
-              .eq("slug", targetSlug)
+              .eq("slug", existingCat.slug)
               .select();
             if (!errBySlug && resData && resData.length > 0) {
               updatedInDb = true;
@@ -946,14 +1126,29 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           }
 
           if (!updatedInDb) {
-            const { data: inserted, error: insertErr } = await supabase
-              .from("menu_categories")
+            const { data: resData, error: errBySlug } = await supabase
+              .from("categories")
+              .update(dbPayload)
+              .eq("slug", data.slug)
+              .select();
+            if (!errBySlug && resData && resData.length > 0) {
+              updatedInDb = true;
+              if (resData[0]?.id) {
+                const realDbId = resData[0].id;
+                newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
+                setCategories(newCats);
+                saveLocalMenuSnapshot(newCats, newItems);
+              }
+            }
+          }
+
+          if (!updatedInDb) {
+            const { data: inserted } = await supabase
+              .from("categories")
               .insert(dbPayload)
               .select()
               .single();
-            if (insertErr) {
-              console.error("Supabase category insert fallback error:", insertErr);
-            } else if (inserted?.id) {
+            if (inserted?.id) {
               const realDbId = inserted.id;
               newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
               setCategories(newCats);
@@ -961,24 +1156,13 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             }
           }
         } else {
-          const { data: inserted, error: insertErr } = await supabase
-            .from("menu_categories")
+          const { data: inserted } = await supabase
+            .from("categories")
             .insert(dbPayload)
             .select()
             .single();
-          if (insertErr) {
-            console.error("Supabase category insert error:", insertErr);
-            toast.error(insertErr.message || "Failed to save category to Supabase");
-          } else if (inserted?.id) {
-            const finalCats = newCats.map((c) =>
-              c.id === catId
-                ? {
-                    ...c,
-                    id: inserted.id,
-                    created_at: inserted.created_at || now,
-                  }
-                : c,
-            );
+          if (inserted?.id) {
+            const finalCats = newCats.map((c) => (c.id === catId ? { ...c, id: inserted.id } : c));
             setCategories(finalCats);
             saveLocalMenuSnapshot(finalCats, newItems);
           }
@@ -1148,6 +1332,101 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       </header>
 
       <main className="mx-auto max-w-7xl w-full px-3 py-3 sm:px-6 sm:py-6 overflow-x-hidden">
+        {/* Menu Database Storage Management Card */}
+        <div className="mb-4 sm:mb-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 sm:p-5 shadow-2xs">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <Database className="size-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-sm sm:text-base font-bold text-foreground">
+                    Menu Database Storage
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] gap-1 px-2 py-0.5"
+                  >
+                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Database Active ({activeItems.length} Dishes, {activeCategories.length}{" "}
+                    Categories)
+                  </Badge>
+                  {isSupabaseConfigured ? (
+                    <Badge variant="secondary" className="text-[10px] text-muted-foreground">
+                      Supabase Cloud Connected
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-[10px] text-muted-foreground">
+                      Server File DB (data/menu-db.json)
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  All menu details (dishes, descriptions, prices, categories, images) are persisted
+                  to the database.
+                  {lastSavedTimestamp && (
+                    <span className="ml-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                      • Last stored: {lastSavedTimestamp}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <Button
+                size="sm"
+                onClick={handleStoreAllToDatabase}
+                disabled={savingToDb}
+                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs h-9 px-3.5"
+                title="Store and persist all menu details to the database"
+              >
+                {savingToDb ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Save className="size-3.5" />
+                )}
+                <span>{savingToDb ? "Storing to DB..." : "Store All to Database"}</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => exportDatabaseBackup(categories, items)}
+                className="gap-1.5 text-xs h-9 px-3 border-border/80"
+                title="Download JSON backup of all stored menu details"
+              >
+                <Download className="size-3.5 text-muted-foreground" />
+                <span className="hidden sm:inline">Export JSON</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDbModal(true)}
+                className="gap-1.5 text-xs h-9 px-3 border-border/80"
+                title="View Database Details and Stats"
+              >
+                <HardDrive className="size-3.5 text-muted-foreground" />
+                <span className="hidden sm:inline">DB Details</span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleResetToDefaults}
+                disabled={savingToDb}
+                className="gap-1 text-xs h-9 px-2 text-muted-foreground hover:text-amber-500"
+                title="Re-seed database with default authentic menu details"
+              >
+                <RotateCcw className="size-3.5" />
+                <span className="hidden xl:inline">Reset Defaults</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+
         {/* Metric Overview Cards */}
         <div className="mb-4 sm:mb-6 grid grid-cols-3 gap-2.5 sm:gap-4">
           <div className="rounded-xl border border-border/60 bg-card p-3 sm:p-5 shadow-2xs">
@@ -1211,7 +1490,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                   Supabase Database Setup Required
                 </p>
                 <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
-                  The <code className="text-foreground">menu_categories</code> and{" "}
+                  The <code className="text-foreground">categories</code> and{" "}
                   <code className="text-foreground">menu_items</code> tables need to be created in
                   your Supabase project.
                 </p>
@@ -1992,6 +2271,152 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         category={editingCategory}
         onSave={handleSaveCategory}
       />
+
+      {/* Database Details Dialog */}
+      <Dialog open={showDbModal} onOpenChange={setShowDbModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <Database className="size-5 text-emerald-500" />
+              Menu Database Storage Details
+            </DialogTitle>
+            <DialogDescription>
+              Real-time inspection of menu details stored in the persistent database.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-sm">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
+                <p className="text-xs text-muted-foreground">Stored Items</p>
+                <p className="text-xl font-bold font-serif text-foreground mt-0.5">
+                  {items.length}
+                </p>
+                <p className="text-[10px] text-muted-foreground">{activeItems.length} active</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
+                <p className="text-xs text-muted-foreground">Categories</p>
+                <p className="text-xl font-bold font-serif text-foreground mt-0.5">
+                  {categories.length}
+                </p>
+                <p className="text-[10px] text-muted-foreground">{activeCategories.length} live</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
+                <p className="text-xs text-muted-foreground">Server Database</p>
+                <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
+                  Active
+                </p>
+                <p className="text-[10px] text-muted-foreground font-mono">data/menu-db.json</p>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
+                <p className="text-xs text-muted-foreground">Supabase Sync</p>
+                <p className="text-xs font-semibold mt-1">
+                  {isSupabaseConfigured ? (
+                    <span className="text-emerald-600 dark:text-emerald-400">Connected</span>
+                  ) : (
+                    <span className="text-muted-foreground">Local fallback</span>
+                  )}
+                </p>
+                <p className="text-[10px] text-muted-foreground">Postgres Tables</p>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground mb-2">
+                Stored Categories & Dishes Breakdown
+              </h4>
+              <div className="max-h-56 overflow-y-auto rounded-xl border border-border divide-y divide-border/60">
+                {activeCategories.map((cat) => {
+                  const catItems = activeItems.filter(
+                    (i) =>
+                      i.category_id === cat.id ||
+                      i.category_id === cat.slug ||
+                      i.category_id === `cat-${cat.slug}` ||
+                      (cat.slug && i.category_id?.includes(cat.slug)),
+                  );
+                  return (
+                    <div
+                      key={cat.id}
+                      className="flex items-center justify-between p-2.5 text-xs hover:bg-muted/30"
+                    >
+                      <div>
+                        <span className="font-medium text-foreground">{cat.name}</span>
+                        <span className="text-muted-foreground ml-2 text-[11px] font-mono">
+                          ({cat.slug || cat.id})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-[10px]">
+                          {catItems.length} {catItems.length === 1 ? "dish" : "dishes"}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                        >
+                          Stored
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground mb-1">How Database Persistence Works:</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>
+                  All details (item names, descriptions, prices, photos, categories) are saved
+                  directly in <code className="text-foreground">data/menu-db.json</code> on the
+                  server.
+                </li>
+                <li>
+                  The public menu (<code className="text-foreground">/menu</code> and home page)
+                  automatically reads from this database.
+                </li>
+                <li>
+                  Any new dishes or updates you make in this Admin Panel are immediately saved to
+                  the database file and synced across devices.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/80">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                exportDatabaseBackup(categories, items);
+              }}
+              className="gap-1.5 text-xs"
+            >
+              <Download className="size-3.5" />
+              <span>Export Database JSON</span>
+            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={async () => {
+                  await handleStoreAllToDatabase();
+                  setShowDbModal(false);
+                }}
+                disabled={savingToDb}
+                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+              >
+                {savingToDb ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Save className="size-3.5" />
+                )}
+                <span>Store All Now</span>
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
