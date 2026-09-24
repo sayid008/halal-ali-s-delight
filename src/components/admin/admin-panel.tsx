@@ -1,29 +1,39 @@
-import { useEffect, useState, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
-  supabase,
-  formatPrice,
-  isSupabaseConfigured,
-  isShopCategory,
   type DatabaseMenuItem,
   type DatabaseCategory,
-  type AdminUserSession,
+  formatPrice,
+  isShopCategory,
+  supabase,
+  isSupabaseConfigured,
 } from "@/lib/supabase";
 import {
+  getLocalMenuSnapshot,
+  saveLocalMenuSnapshot,
   persistCategoryOrder,
   persistItemOrder,
-  saveLocalMenuSnapshot,
-  getLocalMenuSnapshot,
-  MENU_ORDER_EVENT,
 } from "@/lib/menu-order";
+import { useAdminBatchSync } from "@/hooks/use-admin-batch-sync";
 import { MenuItemDialog } from "./menu-item-dialog";
 import { CategoryDialog } from "./category-dialog";
 import { SpecialOfferManager } from "./special-offer-manager";
+import { OpeningHoursManager } from "./opening-hours-manager";
 import { TrashManager } from "./trash-manager";
-import { getDaysRemaining, SUPABASE_TRASH_SQL } from "@/lib/trash";
+import { SUPABASE_TRASH_SQL } from "@/lib/trash";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -31,1084 +41,510 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Link } from "@tanstack/react-router";
 import {
+  UtensilsCrossed,
+  Layers,
+  Sparkles,
+  Clock,
+  Trash2,
+  Database,
   Plus,
   Search,
   LogOut,
   ExternalLink,
   Edit2,
-  Trash2,
-  UtensilsCrossed,
-  Layers,
-  ImageIcon,
-  Tag,
   ChevronUp,
   ChevronDown,
-  AlertCircle,
-  Copy,
-  Check,
+  CheckCircle2,
   Loader2,
-  Sparkles,
-  Database,
-  Save,
-  Download,
   HardDrive,
   RotateCcw,
-  CheckCircle2,
+  Download,
+  Copy,
+  Check,
+  AlertCircle,
 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { menuSections as homeSections } from "@/data/menu";
-import {
-  storeAllMenuDetailsToDatabase,
-  resetDatabaseToDefaults,
-  exportDatabaseBackup,
-  fetchDatabaseStats,
-  type DatabaseStats,
-} from "@/lib/database-menu";
 
 interface AdminPanelProps {
-  session: Session | AdminUserSession | { user: { email?: string } };
-  onSignOut: () => void;
+  session: Session;
+  onSignOut: () => Promise<void>;
 }
-
-function isUUIDFormat(str?: string | null): boolean {
-  return Boolean(
-    str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
-  );
-}
-
-// Convert home page static menu items into structured defaults
-const defaultCategories: DatabaseCategory[] = homeSections.map((sec, idx) => ({
-  id: `cat-${sec.id}`,
-  name: sec.title,
-  slug: sec.id,
-  sort_order: idx + 1,
-  created_at: new Date().toISOString(),
-}));
-
-const defaultItems: DatabaseMenuItem[] = homeSections.flatMap((sec, sIdx) => {
-  const catId = `cat-${sec.id}`;
-  return sec.items.map((dish, dIdx) => {
-    let priceNum = 250;
-    if (typeof dish.price === "number") {
-      priceNum = dish.price < 50 ? Math.round(dish.price * 50) : dish.price;
-    } else if (typeof dish.price === "string") {
-      const parsed = parseFloat(dish.price.replace(/[^\d.]/g, ""));
-      if (!isNaN(parsed)) {
-        priceNum = parsed < 50 ? Math.round(parsed * 50) : Math.round(parsed);
-      }
-    }
-
-    return {
-      id: `dish-${sec.id}-${dIdx + 1}`,
-      name: dish.name,
-      description: dish.description,
-      price: priceNum,
-      category_id: catId,
-      image_url: dish.image || null,
-      available: true,
-      sort_order: (sIdx + 1) * 10 + (dIdx + 1),
-      created_at: new Date().toISOString(),
-    };
-  });
-});
 
 export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
-  const [items, setItems] = useState<DatabaseMenuItem[]>(() => {
-    const cached = getLocalMenuSnapshot();
-    if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
-      return cached.items;
-    }
-    return defaultItems;
-  });
-  const [categories, setCategories] = useState<DatabaseCategory[]>(() => {
-    const cached = getLocalMenuSnapshot();
-    if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-      return cached.categories;
-    }
-    return defaultCategories;
-  });
-  const [loading, setLoading] = useState(false);
-  const [distributing, setDistributing] = useState(false);
+  // Navigation tabs
+  const [activeTab, setActiveTab] = useState<
+    "dishes" | "categories" | "offers" | "hours" | "trash" | "database"
+  >("dishes");
 
-  // Active Tab with URL synchronization
-  const [activeTab, setActiveTab] = useState<"items" | "categories" | "special_offer" | "trash">(
-    () => {
-      if (typeof window !== "undefined") {
-        const params = new URLSearchParams(window.location.search);
-        const tabParam = params.get("tab");
-        if (
-          tabParam === "special_offer" ||
-          tabParam === "special-offer" ||
-          tabParam === "offers" ||
-          tabParam === "offer" ||
-          window.location.hash === "#special_offer" ||
-          window.location.hash === "#special-offer"
-        ) {
-          return "special_offer";
-        }
-        if (tabParam === "categories") {
-          return "categories";
-        }
-        if (tabParam === "trash" || tabParam === "recycle-bin") {
-          return "trash";
-        }
-      }
-      return "items";
-    },
-  );
+  // Menu data states
+  const [categories, setCategories] = useState<DatabaseCategory[]>([]);
+  const [items, setItems] = useState<DatabaseMenuItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  function handleSelectTab(tab: "items" | "categories" | "special_offer" | "trash") {
-    setActiveTab(tab);
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.set("tab", tab);
-      window.history.replaceState({}, "", url.toString());
-    }
-  }
-
-  // Filtering & Search
+  // Filter & Search states
   const [searchQuery, setSearchQuery] = useState("");
-
-  // Dialog States
-  const [itemDialogOpen, setItemDialogOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<DatabaseMenuItem | null>(null);
-
-  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<DatabaseCategory | null>(null);
-
-  const [hasInitialLoaded, setHasInitialLoaded] = useState(false);
-  const [dbTableError, setDbTableError] = useState<string | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
-
-  // Database Storage States
-  const [savingToDb, setSavingToDb] = useState(false);
-  const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
-  const [showDbModal, setShowDbModal] = useState(false);
-  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
-
-  const persistChangesToDatabase = useCallback(
-    (updatedCats: DatabaseCategory[], updatedItems: DatabaseMenuItem[]) => {
-      saveLocalMenuSnapshot(updatedCats, updatedItems, "admin-panel");
-
-      fetch("/api/menu/store-all", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          categories: updatedCats,
-          items: updatedItems,
-          last_updated: new Date().toISOString(),
-          version: 1,
-        }),
-      }).catch((err) => {
-        console.warn("Auto-persist to database notice:", err);
-      });
-    },
-    [],
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+  const [availabilityFilter, setAvailabilityFilter] = useState<"all" | "available" | "unavailable">(
+    "all",
   );
 
-  async function handleStoreAllToDatabase() {
-    setSavingToDb(true);
-    try {
-      const res = await storeAllMenuDetailsToDatabase(categories, items);
-      setLastSavedTimestamp(new Date().toLocaleTimeString());
-      setDbStats({
-        totalItems: items.length,
-        totalCategories: categories.length,
-        availableItems: items.filter((i) => !i.deleted_at && i.available !== false).length,
-        lastUpdated: new Date().toISOString(),
-        isHealthy: true,
-        version: 1,
-      });
-      toast.success(res.message, {
-        description: `All ${items.length} dishes and ${categories.length} categories are permanently stored in the database.`,
-        duration: 3000,
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to store to database";
-      toast.error(msg);
-    } finally {
-      setSavingToDb(false);
-    }
-  }
+  // Dialog states
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [selectedCategoryForEdit, setSelectedCategoryForEdit] = useState<DatabaseCategory | null>(
+    null,
+  );
 
-  async function handleResetToDefaults() {
-    if (
-      !window.confirm(
-        "Re-seed database with default full menu? This will restore all 20 authentic dishes and 6 categories to the database (data/menu-db.json).",
-      )
-    ) {
-      return;
-    }
-    setSavingToDb(true);
+  const [itemModalOpen, setItemModalOpen] = useState(false);
+  const [selectedItemForEdit, setSelectedItemForEdit] = useState<DatabaseMenuItem | null>(null);
+
+  // Database Backup modal
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [resettingDefaults, setResettingDefaults] = useState(false);
+
+  // Batch sync hook
+  const batchSync = useAdminBatchSync({
+    initialCategories: categories,
+    initialItems: items,
+    onRollback: (rolledCats, rolledItems) => {
+      setCategories(rolledCats);
+      setItems(rolledItems);
+    },
+    debounceMs: 300,
+  });
+
+  // Load menu data on mount
+  const loadMenuData = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await resetDatabaseToDefaults();
-      if (res && res.categories && res.items) {
-        setCategories(res.categories);
-        setItems(res.items);
-        setLastSavedTimestamp(new Date().toLocaleTimeString());
-        toast.success("Database reset and stored with full default menu!", {
-          description: `Restored ${res.items.length} dishes in ${res.categories.length} categories.`,
-        });
-        const stats = await fetchDatabaseStats();
-        if (stats) setDbStats(stats);
+      // 1. Check local snapshot first
+      const cached = getLocalMenuSnapshot();
+      if (cached && cached.categories?.length > 0) {
+        setCategories(cached.categories);
+        setItems(cached.items || []);
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to reset database";
-      toast.error(msg);
-    } finally {
-      setSavingToDb(false);
-    }
-  }
 
-  async function loadData() {
-    if (items.length === 0 || categories.length === 0) {
-      setLoading(true);
-    }
-    setDbTableError(null);
-
-    // 1. Primary source: Load from server API database (/data/menu-db.json)
-    try {
-      const res = await fetch("/api/menu", {
-        headers: { "cache-control": "no-cache" },
-      });
+      // 2. Fetch server state
+      const res = await fetch("/api/menu", { cache: "no-store" });
       if (res.ok) {
-        const apiData = (await res.json()) as {
-          categories?: DatabaseCategory[];
-          items?: DatabaseMenuItem[];
-        };
-        if (
-          apiData.categories &&
-          Array.isArray(apiData.categories) &&
-          apiData.categories.length > 0
-        ) {
-          setCategories(apiData.categories);
-          setItems(apiData.items || []);
-          cacheLocalMenu(apiData.categories, apiData.items || []);
-          setHasInitialLoaded(true);
-          setLoading(false);
-          return;
+        const data = await res.json();
+        if (data.categories && data.items) {
+          setCategories(data.categories);
+          setItems(data.items);
+          saveLocalMenuSnapshot(data.categories, data.items, "admin-panel", {
+            skipServerFetch: true,
+          });
         }
       }
-    } catch {
-      // ignore fetch error, proceed to alternatives
+    } catch (err) {
+      console.warn("Could not fetch server menu data:", err);
+    } finally {
+      setLoading(false);
     }
-
-    // 2. Secondary source: If Supabase is configured and server API had no data
-    if (isSupabaseConfigured) {
-      try {
-        const timeoutPromise = new Promise<{
-          data: null;
-          error: { message: string; code: string };
-        }>((resolve) =>
-          setTimeout(
-            () => resolve({ data: null, error: { message: "Request timeout", code: "TIMEOUT" } }),
-            2500,
-          ),
-        );
-
-        const [catRes, itemRes] = await Promise.all([
-          Promise.race([
-            supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-            timeoutPromise,
-          ]),
-          Promise.race([
-            supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
-            timeoutPromise,
-          ]),
-        ]);
-
-        const loadedCategories = (catRes.data as DatabaseCategory[]) || [];
-        const loadedItems = (itemRes.data as DatabaseMenuItem[]) || [];
-
-        if (loadedCategories.length > 0) {
-          setCategories(loadedCategories);
-          setItems(loadedItems);
-          saveLocalMenuSnapshot(loadedCategories, loadedItems);
-          setHasInitialLoaded(true);
-          setLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.warn("Could not load from Supabase:", err);
-      }
-    }
-
-    // 3. Fallback: local snapshot cache or defaults
-    const cached = getLocalMenuSnapshot();
-    if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-      setCategories(cached.categories);
-      setItems(cached.items || []);
-      saveLocalMenuSnapshot(cached.categories, cached.items || []);
-    } else {
-      setCategories(defaultCategories);
-      setItems(defaultItems);
-      saveLocalMenuSnapshot(defaultCategories, defaultItems);
-    }
-    setHasInitialLoaded(true);
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    loadData();
-
-    const handleLocalUpdate = (e?: Event) => {
-      if (e && "detail" in e && e.detail) {
-        const detail = (e as CustomEvent).detail as {
-          source?: string;
-          categories?: DatabaseCategory[];
-          items?: DatabaseMenuItem[];
-        };
-        // If event came from current admin panel, ignore to avoid overwriting active state
-        if (detail.source === "admin-panel") {
-          return;
-        }
-        if (detail.categories && Array.isArray(detail.categories)) {
-          setCategories(detail.categories);
-        }
-        if (detail.items && Array.isArray(detail.items)) {
-          setItems(detail.items);
-        }
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        loadData();
-      }
-    };
-
-    window.addEventListener(MENU_ORDER_EVENT, handleLocalUpdate as EventListener);
-    window.addEventListener("storage", handleLocalUpdate as EventListener);
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
-
-    let bc: BroadcastChannel | null = null;
-    if (typeof BroadcastChannel !== "undefined") {
-      try {
-        bc = new BroadcastChannel("halal_ali_menu_channel");
-        bc.onmessage = (msgEvent) => {
-          if (msgEvent.data && typeof msgEvent.data === "object") {
-            if (msgEvent.data.source === "admin-panel") return;
-            if (msgEvent.data.categories && Array.isArray(msgEvent.data.categories)) {
-              setCategories(msgEvent.data.categories);
-            }
-            if (msgEvent.data.items && Array.isArray(msgEvent.data.items)) {
-              setItems(msgEvent.data.items);
-            }
-          }
-        };
-      } catch {
-        // ignore channel errors
-      }
-    }
-
-    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
-    if (isSupabaseConfigured) {
-      try {
-        realtimeChannel = supabase
-          .channel("admin-menu-realtime")
-          .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () =>
-            loadData(),
-          )
-          .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () =>
-            loadData(),
-          )
-          .subscribe();
-      } catch (err) {
-        console.warn("Could not subscribe AdminPanel to Supabase Realtime:", err);
-      }
-    }
-
-    return () => {
-      window.removeEventListener(MENU_ORDER_EVENT, handleLocalUpdate as EventListener);
-      window.removeEventListener("storage", handleLocalUpdate as EventListener);
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-      }
-      if (bc) {
-        bc.close();
-      }
-      if (realtimeChannel) {
-        supabase.removeChannel(realtimeChannel);
-      }
-    };
   }, []);
 
-  // Separate Active vs Trashed items
-  const activeItems = useMemo(() => items.filter((i) => !i.deleted_at), [items]);
-  const activeCategories = useMemo(() => categories.filter((c) => !c.deleted_at), [categories]);
-  const trashedItems = useMemo(() => items.filter((i) => !!i.deleted_at), [items]);
-  const trashedCategories = useMemo(() => categories.filter((c) => !!c.deleted_at), [categories]);
+  useEffect(() => {
+    loadMenuData();
+  }, [loadMenuData]);
 
-  // Toggle Dish Visibility (Active vs Inactive)
-  async function handleToggleItemVisibility(item: DatabaseMenuItem) {
-    const nextVal = item.available === false ? true : false;
-    const updatedItems = items.map((i) => (i.id === item.id ? { ...i, available: nextVal } : i));
-    setItems(updatedItems);
-    persistChangesToDatabase(categories, updatedItems);
+  // Helper to commit changes
+  const persistChanges = useCallback(
+    (
+      newCats: DatabaseCategory[],
+      newItems: DatabaseMenuItem[],
+      options?: { immediate?: boolean },
+    ) => {
+      setCategories(newCats);
+      setItems(newItems);
+      batchSync.queueBatchUpdate(newCats, newItems, { immediate: options?.immediate });
+    },
+    [batchSync],
+  );
 
-    toast.success(
-      nextVal
-        ? `"${item.name}" is now Active (Visible on customer menu)`
-        : `"${item.name}" is now Inactive (Hidden from customer menu)`,
-    );
+  // Active vs Trashed sets
+  const activeCategories = useMemo(
+    () =>
+      categories
+        .filter((c) => !c.deleted_at)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [categories],
+  );
 
-    if (isSupabaseConfigured) {
-      try {
-        let { error } = await supabase
-          .from("menu_items")
-          .update({ available: nextVal })
-          .eq("id", item.id);
-        if (error || item.id.startsWith("dish-")) {
-          const nameRes = await supabase
-            .from("menu_items")
-            .update({ available: nextVal })
-            .eq("name", item.name);
-          if (!nameRes.error) error = null;
-        }
-      } catch (err: unknown) {
-        console.warn("Could not sync item visibility to Supabase:", err);
+  const trashedCategories = useMemo(
+    () => categories.filter((c) => Boolean(c.deleted_at)),
+    [categories],
+  );
+
+  const activeItems = useMemo(
+    () =>
+      items.filter((i) => !i.deleted_at).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [items],
+  );
+
+  const trashedItems = useMemo(() => items.filter((i) => Boolean(i.deleted_at)), [items]);
+
+  // Filtered dishes for view
+  const filteredItems = useMemo(() => {
+    return activeItems.filter((dish) => {
+      // Search filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = dish.name.toLowerCase().includes(q);
+        const matchesDesc = (dish.description || "").toLowerCase().includes(q);
+        if (!matchesName && !matchesDesc) return false;
       }
-    }
-  }
 
-  // Toggle Category Visibility (Active vs Inactive)
-  async function handleToggleCategoryVisibility(cat: DatabaseCategory) {
-    const nextVal = cat.available === false ? true : false;
-    const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, available: nextVal } : c));
-    setCategories(updatedCats);
-    persistChangesToDatabase(updatedCats, items);
-
-    toast.success(
-      nextVal
-        ? `Category "${cat.name}" is now Active (Visible on customer menu)`
-        : `Category "${cat.name}" is now Inactive (Hidden from customer menu)`,
-    );
-
-    if (isSupabaseConfigured) {
-      try {
-        let { error } = await supabase
-          .from("categories")
-          .update({ available: nextVal })
-          .eq("id", cat.id);
-        if (error || cat.id.startsWith("cat-")) {
-          const slugRes = await supabase
-            .from("categories")
-            .update({ available: nextVal })
-            .eq("slug", cat.slug);
-          if (!slugRes.error) error = null;
-        }
-      } catch (err: unknown) {
-        console.warn("Could not sync category visibility to Supabase:", err);
+      // Category filter
+      if (selectedCategoryFilter !== "all") {
+        if (dish.category_id !== selectedCategoryFilter) return false;
       }
-    }
-  }
 
-  // Move Item to Trash (Soft Delete for 30 days)
-  async function handleTrashItem(item: DatabaseMenuItem) {
-    if (
-      !window.confirm(
-        `Move "${item.name}" to Trash? It will be hidden from website visitors and kept in Trash for 30 days.`,
-      )
-    ) {
-      return;
-    }
+      // Availability filter
+      if (availabilityFilter === "available" && !dish.available) return false;
+      if (availabilityFilter === "unavailable" && dish.available) return false;
 
-    const now = new Date().toISOString();
-    const updatedItems = items.map((i) =>
-      i.id === item.id ? { ...i, deleted_at: now, available: false } : i,
-    );
-    setItems(updatedItems);
-    persistChangesToDatabase(categories, updatedItems);
-    toast.success(`"${item.name}" moved to Trash (auto-purges in 30 days)`);
+      return true;
+    });
+  }, [activeItems, searchQuery, selectedCategoryFilter, availabilityFilter]);
 
-    if (isSupabaseConfigured) {
-      try {
-        const { error } = await supabase
-          .from("menu_items")
-          .update({ deleted_at: now, available: false })
-          .eq("id", item.id);
-        if (error || item.id.startsWith("dish-")) {
-          await supabase
-            .from("menu_items")
-            .update({ deleted_at: now, available: false })
-            .eq("name", item.name);
-        }
-      } catch (err: unknown) {
-        console.warn("Could not sync trashed item to Supabase:", err);
-      }
-    }
-  }
+  // Metrics
+  const totalDishes = activeItems.length;
+  const inStockDishes = activeItems.filter((i) => i.available).length;
+  const outOfStockDishes = totalDishes - inStockDishes;
+  const totalCategories = activeCategories.length;
+  const totalTrash = trashedCategories.length + trashedItems.length;
 
-  // Move Category to Trash (Soft Delete category and attached dishes)
-  async function handleTrashCategory(cat: DatabaseCategory) {
-    const isMatchingItem = (i: DatabaseMenuItem) =>
-      i.category_id === cat.id ||
-      i.category_id === cat.slug ||
-      i.category_id === `cat-${cat.slug}` ||
-      Boolean(cat.slug && i.category_id?.includes(cat.slug)) ||
-      Boolean(cat.name && i.category_id?.toLowerCase() === cat.name.toLowerCase());
-
-    const associatedItems = activeItems.filter(isMatchingItem);
-    const confirmMessage =
-      associatedItems.length > 0
-        ? `Move category "${cat.name}" and its ${associatedItems.length} dishes to Trash? They will be hidden from visitors and kept in Trash for 30 days.`
-        : `Move category "${cat.name}" to Trash? It will be hidden from visitors and kept in Trash for 30 days.`;
-
-    if (!window.confirm(confirmMessage)) return;
-
-    const now = new Date().toISOString();
-    const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, deleted_at: now } : c));
-    const updatedItems = items.map((i) =>
-      isMatchingItem(i) ? { ...i, deleted_at: now, available: false } : i,
-    );
-    setCategories(updatedCats);
-    setItems(updatedItems);
-    persistChangesToDatabase(updatedCats, updatedItems);
-    toast.success(`Category "${cat.name}" moved to Trash`);
-
-    if (isSupabaseConfigured) {
-      try {
-        const { error: catErr } = await supabase
-          .from("categories")
-          .update({ deleted_at: now })
-          .eq("id", cat.id);
-        if (catErr || cat.id.startsWith("cat-")) {
-          await supabase.from("categories").update({ deleted_at: now }).eq("slug", cat.slug);
-        }
-
-        if (associatedItems.length > 0) {
-          await supabase
-            .from("menu_items")
-            .update({ deleted_at: now, available: false })
-            .eq("category_id", cat.id);
-        }
-      } catch (err: unknown) {
-        console.warn("Could not sync trashed category to Supabase:", err);
-      }
-    }
-  }
-
-  // Restore Item from Trash
-  async function handleRestoreItem(item: DatabaseMenuItem) {
-    const updatedItems = items.map((i) =>
-      i.id === item.id ? { ...i, deleted_at: null, available: true } : i,
-    );
-    setItems(updatedItems);
-    persistChangesToDatabase(categories, updatedItems);
-    toast.success(`"${item.name}" restored to menu!`);
-
-    if (isSupabaseConfigured) {
-      try {
-        const { error } = await supabase
-          .from("menu_items")
-          .update({ deleted_at: null, available: true })
-          .eq("id", item.id);
-        if (error || item.id.startsWith("dish-")) {
-          await supabase
-            .from("menu_items")
-            .update({ deleted_at: null, available: true })
-            .eq("name", item.name);
-        }
-      } catch (err: unknown) {
-        console.warn("Could not sync restore item to Supabase:", err);
-      }
-    }
-  }
-
-  // Restore Category from Trash
-  async function handleRestoreCategory(cat: DatabaseCategory) {
-    const isMatchingItem = (i: DatabaseMenuItem) =>
-      i.category_id === cat.id ||
-      i.category_id === cat.slug ||
-      i.category_id === `cat-${cat.slug}` ||
-      Boolean(cat.slug && i.category_id?.includes(cat.slug)) ||
-      Boolean(cat.name && i.category_id?.toLowerCase() === cat.name.toLowerCase());
-
-    const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, deleted_at: null } : c));
-    const updatedItems = items.map((i) =>
-      isMatchingItem(i) ? { ...i, deleted_at: null, available: true } : i,
-    );
-    setCategories(updatedCats);
-    setItems(updatedItems);
-    persistChangesToDatabase(updatedCats, updatedItems);
-    toast.success(`Category "${cat.name}" and attached dishes restored!`);
-
-    if (isSupabaseConfigured) {
-      try {
-        const { error } = await supabase
-          .from("categories")
-          .update({ deleted_at: null })
-          .eq("id", cat.id);
-        if (error || cat.id.startsWith("cat-")) {
-          await supabase.from("categories").update({ deleted_at: null }).eq("slug", cat.slug);
-        }
-
-        await supabase
-          .from("menu_items")
-          .update({ deleted_at: null, available: true })
-          .eq("category_id", cat.id);
-      } catch (err: unknown) {
-        console.warn("Could not sync restore category to Supabase:", err);
-      }
-    }
-  }
-
-  // Permanently Delete Item
-  async function handlePermanentDeleteItem(item: DatabaseMenuItem) {
-    const updatedItems = items.filter((i) => i.id !== item.id);
-    setItems(updatedItems);
-    persistChangesToDatabase(categories, updatedItems);
-    toast.success(`"${item.name}" permanently deleted`);
-
-    if (isSupabaseConfigured) {
-      try {
-        const { error } = await supabase.from("menu_items").delete().eq("id", item.id);
-        if (error || item.id.startsWith("dish-")) {
-          await supabase.from("menu_items").delete().eq("name", item.name);
-        }
-      } catch (err: unknown) {
-        console.warn("Could not sync permanent delete item to Supabase:", err);
-      }
-    }
-  }
-
-  // Permanently Delete Category
-  async function handlePermanentDeleteCategory(cat: DatabaseCategory) {
-    const isMatchingItem = (i: DatabaseMenuItem) =>
-      i.category_id === cat.id ||
-      i.category_id === cat.slug ||
-      i.category_id === `cat-${cat.slug}` ||
-      Boolean(cat.slug && i.category_id?.includes(cat.slug)) ||
-      Boolean(cat.name && i.category_id?.toLowerCase() === cat.name.toLowerCase());
-
-    const updatedCats = categories.filter((c) => c.id !== cat.id);
-    const updatedItems = items.map((i) => (isMatchingItem(i) ? { ...i, category_id: null } : i));
-    setCategories(updatedCats);
-    setItems(updatedItems);
-    persistChangesToDatabase(updatedCats, updatedItems);
-    toast.success(`Category "${cat.name}" permanently deleted`);
-
-    if (isSupabaseConfigured) {
-      try {
-        await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
-        const { error } = await supabase.from("categories").delete().eq("id", cat.id);
-        if (error || cat.id.startsWith("cat-")) {
-          await supabase.from("categories").delete().eq("slug", cat.slug);
-        }
-      } catch (err: unknown) {
-        console.warn("Could not sync permanent delete category to Supabase:", err);
-      }
-    }
-  }
-
-  // Empty Entire Trash
-  async function handleEmptyTrash() {
-    const remainingItems = items.filter((i) => !i.deleted_at);
-    const remainingCats = categories.filter((c) => !c.deleted_at);
-    setItems(remainingItems);
-    setCategories(remainingCats);
-    persistChangesToDatabase(remainingCats, remainingItems);
-    toast.success("Trash emptied permanently");
-
-    if (isSupabaseConfigured) {
-      try {
-        // Hard delete trashed menu items
-        await supabase.from("menu_items").delete().not("deleted_at", "is", null);
-
-        // Unlink attached dishes from trashed categories
-        for (const cat of trashedCategories) {
-          await supabase.from("menu_items").update({ category_id: null }).eq("category_id", cat.id);
-        }
-
-        // Hard delete trashed categories
-        await supabase.from("categories").delete().not("deleted_at", "is", null);
-      } catch (err: unknown) {
-        console.warn("Could not sync empty trash to Supabase:", err);
-      }
-    }
-  }
-
-  // Save Item (Add or Edit) with optimistic update + instant local sync + background DB push
-  async function handleSaveItem(data: {
-    id?: string;
-    name: string;
-    description: string | null;
-    price: number;
-    category_id: string | null;
-    image_url: string | null;
-    available: boolean;
-    sort_order: number;
-  }) {
-    const isEditing = Boolean(data.id);
-    const itemId = data.id || `dish_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const existingItem = items.find((i) => i.id === data.id);
-
-    const updatedItem: DatabaseMenuItem = {
-      id: itemId,
-      name: data.name,
-      description: data.description,
-      price: data.price,
-      category_id: data.category_id,
-      image_url: data.image_url,
-      available: data.available,
-      sort_order: data.sort_order || (items.length + 1) * 10,
-      created_at: existingItem?.created_at || now,
-      deleted_at: null,
-    };
-
-    let newItems: DatabaseMenuItem[];
-    if (isEditing) {
-      newItems = items.map((i) => (i.id === data.id ? { ...i, ...updatedItem } : i));
-    } else {
-      newItems = [updatedItem, ...items];
-    }
-
-    setItems(newItems);
-    persistChangesToDatabase(categories, newItems);
-
-    toast.success(isEditing ? `"${data.name}" updated!` : `"${data.name}" added to menu!`);
-
-    // Sync to Supabase in the background if configured (non-blocking)
-    if (isSupabaseConfigured) {
-      (async () => {
-        try {
-          const isUUIDFormat = (str?: string | null): boolean =>
-            Boolean(
-              str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
-            );
-
-          let dbCategoryId = data.category_id;
-          if (dbCategoryId && !isUUIDFormat(dbCategoryId)) {
-            const matched = categories.find(
-              (c) =>
-                c.id === dbCategoryId ||
-                c.slug === dbCategoryId ||
-                c.name.toLowerCase() === dbCategoryId?.toLowerCase(),
-            );
-            if (matched && isUUIDFormat(matched.id)) {
-              dbCategoryId = matched.id;
-            } else {
-              const { data: sbCats } = await supabase.from("categories").select("id, slug, name");
-              const targetSlug = matched?.slug || dbCategoryId;
-              const sbCat = (sbCats || []).find(
-                (c) => c.slug === targetSlug || c.name.toLowerCase() === targetSlug.toLowerCase(),
-              );
-              if (sbCat && isUUIDFormat(sbCat.id)) {
-                dbCategoryId = sbCat.id;
-              }
-            }
-          }
-
-          const dbPayload = {
-            name: data.name,
-            description: data.description,
-            price: data.price,
-            category_id: dbCategoryId && isUUIDFormat(dbCategoryId) ? dbCategoryId : null,
-            image_url: data.image_url,
-            available: data.available,
-            sort_order: data.sort_order,
-          };
-
-          if (isEditing) {
-            let updatedInDb = false;
-
-            if (data.id && isUUIDFormat(data.id)) {
-              const { data: resData, error: err } = await supabase
-                .from("menu_items")
-                .update(dbPayload)
-                .eq("id", data.id)
-                .select();
-              if (!err && resData && resData.length > 0) {
-                updatedInDb = true;
-              }
-            }
-
-            if (!updatedInDb && existingItem?.name) {
-              const { data: resData, error: errByName } = await supabase
-                .from("menu_items")
-                .update(dbPayload)
-                .eq("name", existingItem.name)
-                .select();
-              if (!errByName && resData && resData.length > 0) {
-                updatedInDb = true;
-              }
-            }
-
-            if (!updatedInDb) {
-              await supabase.from("menu_items").insert(dbPayload);
-            }
-          } else {
-            await supabase.from("menu_items").insert(dbPayload);
-          }
-        } catch (dbErr) {
-          console.warn("Could not sync item to Supabase:", dbErr);
-        }
-      })();
-    }
-  }
-
-  // Save Category (Add or Edit)
-  async function handleSaveCategory(data: {
+  // -------------------------------------------------------------
+  // CATEGORY ACTIONS
+  // -------------------------------------------------------------
+  function handleSaveCategory(data: {
     id?: string;
     name: string;
     slug: string;
     sort_order: number;
     available: boolean;
   }) {
-    const isEditing = Boolean(data.id);
-    const catId = data.id || `cat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const existingCat = categories.find((c) => c.id === data.id);
-
-    const updatedCat: DatabaseCategory = {
-      id: catId,
-      name: data.name,
-      slug: data.slug,
-      sort_order: data.sort_order || (categories.length + 1) * 10,
-      available: data.available,
-      created_at: existingCat?.created_at || now,
-      deleted_at: null,
-    };
-
-    let newCats: DatabaseCategory[];
-    let newItems = items;
-    if (isEditing) {
-      newCats = categories.map((c) => (c.id === data.id ? { ...c, ...updatedCat } : c));
-      if (existingCat && (existingCat.slug !== data.slug || existingCat.id !== catId)) {
-        newItems = items.map((i) => {
-          if (
-            i.category_id === existingCat.id ||
-            i.category_id === existingCat.slug ||
-            i.category_id === `cat-${existingCat.slug}`
-          ) {
-            return { ...i, category_id: catId };
-          }
-          return i;
-        });
-        setItems(newItems);
-      }
+    let updatedCats = [...categories];
+    if (data.id) {
+      // Edit existing
+      updatedCats = updatedCats.map((c) => (c.id === data.id ? { ...c, ...data } : c));
+      toast.success(`Category "${data.name}" updated`);
     } else {
-      newCats = [...categories, updatedCat];
+      // Add new
+      const newCat: DatabaseCategory = {
+        id: "cat-" + Date.now(),
+        name: data.name,
+        slug: data.slug,
+        sort_order: data.sort_order,
+        available: data.available,
+        created_at: new Date().toISOString(),
+      };
+      updatedCats.push(newCat);
+      toast.success(`Category "${data.name}" created`);
     }
 
-    setCategories(newCats);
-    persistChangesToDatabase(newCats, newItems);
+    persistChanges(updatedCats, items, { immediate: true });
+  }
 
-    toast.success(
-      isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
+  function handleTrashCategory(cat: DatabaseCategory) {
+    const now = new Date().toISOString();
+    const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, deleted_at: now } : c));
+
+    // Also soft-delete associated dishes
+    const updatedItems = items.map((i) =>
+      i.category_id === cat.id ? { ...i, deleted_at: now } : i,
     );
 
-    // Sync to Supabase in the background if configured (non-blocking)
-    if (isSupabaseConfigured) {
-      (async () => {
-        try {
-          const isUUIDFormat = (str?: string | null): boolean =>
-            Boolean(
-              str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
-            );
-
-          const dbPayload = {
-            name: data.name,
-            slug: data.slug,
-            sort_order: data.sort_order,
-            available: data.available,
-          };
-
-          if (isEditing) {
-            let updatedInDb = false;
-
-            if (data.id && isUUIDFormat(data.id)) {
-              const { data: resData, error: err } = await supabase
-                .from("categories")
-                .update(dbPayload)
-                .eq("id", data.id)
-                .select();
-              if (!err && resData && resData.length > 0) {
-                updatedInDb = true;
-              }
-            }
-
-            if (!updatedInDb && existingCat?.slug) {
-              const { data: resData, error: errBySlug } = await supabase
-                .from("categories")
-                .update(dbPayload)
-                .eq("slug", existingCat.slug)
-                .select();
-              if (!errBySlug && resData && resData.length > 0) {
-                updatedInDb = true;
-              }
-            }
-
-            if (!updatedInDb) {
-              await supabase.from("categories").insert(dbPayload);
-            }
-          } else {
-            await supabase.from("categories").insert(dbPayload);
-          }
-        } catch (dbErr) {
-          console.warn("Could not sync category to Supabase:", dbErr);
-        }
-      })();
-    }
+    persistChanges(updatedCats, updatedItems, { immediate: true });
+    toast.info(`Moved category "${cat.name}" and its dishes to Trash`);
   }
 
-  // Filtered menu items, ordered by sort_order
-  const filteredItems = useMemo(() => {
-    const list = activeItems.filter((item) => {
-      return (
-        !searchQuery ||
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    });
-
-    return list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  }, [activeItems, searchQuery]);
-
-  // Categories sorted by sort_order
-  const sortedCategories = useMemo(() => {
-    return [...activeCategories].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  }, [activeCategories]);
-
-  // Lookup map for category name
-  const categoryMap = useMemo(() => {
-    const map = new Map<string, string>();
-    categories.forEach((cat) => {
-      map.set(cat.id, cat.name);
-      map.set(cat.slug, cat.name);
-    });
-    return map;
-  }, [categories]);
-
-  // Reorder categories step-by-step with immediate database persistence
-  async function handleReorderCategories(fromIdx: number, toIdx: number) {
-    if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || toIdx >= sortedCategories.length) return;
-    const current = [...sortedCategories];
-    const [movedCat] = current.splice(fromIdx, 1);
-    current.splice(toIdx, 0, movedCat);
-
-    const reordered = current.map((cat, idx) => ({
-      ...cat,
-      sort_order: idx + 1,
-    }));
-
-    setCategories(reordered);
-    persistChangesToDatabase(reordered, items);
-    toast.success(`"${movedCat.name}" moved to position #${toIdx + 1}`);
-
-    try {
-      await persistCategoryOrder(reordered);
-    } catch (err) {
-      console.warn("Failed to persist category order:", err);
-    }
-  }
-
-  // Reorder menu items step-by-step with immediate database persistence
-  async function handleReorderItems(fromFilteredIdx: number, toFilteredIdx: number) {
+  function handleMoveCategory(index: number, direction: "up" | "down") {
     if (
-      fromFilteredIdx === toFilteredIdx ||
-      fromFilteredIdx < 0 ||
-      toFilteredIdx < 0 ||
-      toFilteredIdx >= filteredItems.length
-    )
+      (direction === "up" && index === 0) ||
+      (direction === "down" && index === activeCategories.length - 1)
+    ) {
       return;
+    }
 
-    const fromItem = filteredItems[fromFilteredIdx];
-    const toItem = filteredItems[toFilteredIdx];
-    if (!fromItem || !toItem) return;
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    const reordered = [...activeCategories];
+    const temp = reordered[index];
+    reordered[index] = reordered[targetIndex];
+    reordered[targetIndex] = temp;
 
-    const masterItems = [...items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    const masterFromIdx = masterItems.findIndex((i) => i.id === fromItem.id);
-    const masterToIdx = masterItems.findIndex((i) => i.id === toItem.id);
+    // Re-assign sort orders
+    const updatedOrderCats = reordered.map((cat, i) => ({ ...cat, sort_order: i }));
 
-    if (masterFromIdx === -1 || masterToIdx === -1) return;
+    // Merge with trashed
+    const finalCats = categories.map((c) => {
+      const match = updatedOrderCats.find((u) => u.id === c.id);
+      return match || c;
+    });
 
-    const [movedItem] = masterItems.splice(masterFromIdx, 1);
-    masterItems.splice(masterToIdx, 0, movedItem);
+    persistChanges(finalCats, items);
+  }
 
-    const reordered = masterItems.map((item, idx) => ({
-      ...item,
-      sort_order: idx + 1,
-    }));
+  // -------------------------------------------------------------
+  // DISH ACTIONS
+  // -------------------------------------------------------------
+  function handleSaveDish(data: {
+    id?: string;
+    name: string;
+    description: string;
+    price: number;
+    category_id: string | null;
+    image_url: string | null;
+    available: boolean;
+    sort_order: number;
+  }) {
+    let updatedItems = [...items];
+    if (data.id) {
+      // Edit existing
+      updatedItems = updatedItems.map((i) => (i.id === data.id ? { ...i, ...data } : i));
+      toast.success(`Dish "${data.name}" updated`);
+    } else {
+      // Add new
+      const newItem: DatabaseMenuItem = {
+        id: "item-" + Date.now(),
+        name: data.name,
+        description: data.description,
+        price: data.price,
+        category_id: data.category_id,
+        image_url: data.image_url,
+        available: data.available,
+        sort_order: data.sort_order,
+        created_at: new Date().toISOString(),
+      };
+      updatedItems.push(newItem);
+      toast.success(`Dish "${data.name}" added to menu`);
+    }
 
-    setItems(reordered);
-    persistChangesToDatabase(categories, reordered);
-    toast.success(`"${movedItem.name}" moved to position #${toFilteredIdx + 1}`);
+    persistChanges(categories, updatedItems, { immediate: true });
+  }
 
-    try {
-      await persistItemOrder(reordered);
-    } catch (err) {
-      console.warn("Failed to persist item order:", err);
+  function handleToggleDishAvailable(dish: DatabaseMenuItem) {
+    const newStatus = !dish.available;
+    const updatedItems = items.map((i) => (i.id === dish.id ? { ...i, available: newStatus } : i));
+
+    persistChanges(categories, updatedItems);
+    toast.success(`"${dish.name}" is now ${newStatus ? "In Stock (Available)" : "Out of Stock"}`, {
+      duration: 2000,
+    });
+  }
+
+  function handleTrashDish(dish: DatabaseMenuItem) {
+    const now = new Date().toISOString();
+    const updatedItems = items.map((i) => (i.id === dish.id ? { ...i, deleted_at: now } : i));
+
+    persistChanges(categories, updatedItems, { immediate: true });
+    toast.info(`Moved "${dish.name}" to Trash`);
+  }
+
+  function handleMoveDish(dish: DatabaseMenuItem, direction: "up" | "down") {
+    const categoryDishes = activeItems.filter((i) => i.category_id === dish.category_id);
+    const index = categoryDishes.findIndex((i) => i.id === dish.id);
+
+    if (
+      (direction === "up" && index <= 0) ||
+      (direction === "down" && index >= categoryDishes.length - 1)
+    ) {
+      return;
+    }
+
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    const reordered = [...categoryDishes];
+    const temp = reordered[index];
+    reordered[index] = reordered[targetIndex];
+    reordered[targetIndex] = temp;
+
+    const updatedCatItems = reordered.map((item, i) => ({ ...item, sort_order: i }));
+
+    const finalItems = items.map((item) => {
+      const match = updatedCatItems.find((u) => u.id === item.id);
+      return match || item;
+    });
+
+    persistChanges(categories, finalItems);
+  }
+
+  // -------------------------------------------------------------
+  // TRASH RESTORE / PURGE ACTIONS
+  // -------------------------------------------------------------
+  function handleRestoreCategory(catId: string) {
+    const updatedCats = categories.map((c) => (c.id === catId ? { ...c, deleted_at: null } : c));
+    // Also restore associated dishes
+    const updatedItems = items.map((i) =>
+      i.category_id === catId ? { ...i, deleted_at: null } : i,
+    );
+
+    persistChanges(updatedCats, updatedItems, { immediate: true });
+    toast.success("Category and its dishes restored to active menu");
+  }
+
+  function handleRestoreDish(dishId: string) {
+    const updatedItems = items.map((i) => (i.id === dishId ? { ...i, deleted_at: null } : i));
+
+    persistChanges(categories, updatedItems, { immediate: true });
+    toast.success("Dish restored to active menu");
+  }
+
+  function handlePermanentDeleteCategory(catId: string) {
+    const updatedCats = categories.filter((c) => c.id !== catId);
+    const updatedItems = items.filter((i) => i.category_id !== catId);
+
+    persistChanges(updatedCats, updatedItems, { immediate: true });
+    toast.info("Category permanently purged");
+  }
+
+  function handlePermanentDeleteDish(dishId: string) {
+    const updatedItems = items.filter((i) => i.id !== dishId);
+
+    persistChanges(categories, updatedItems, { immediate: true });
+    toast.info("Dish permanently purged");
+  }
+
+  function handleEmptyAllTrash() {
+    const updatedCats = categories.filter((c) => !c.deleted_at);
+    const updatedItems = items.filter((i) => !i.deleted_at);
+
+    persistChanges(updatedCats, updatedItems, { immediate: true });
+    toast.success("All trashed items permanently deleted");
+  }
+
+  // -------------------------------------------------------------
+  // DATABASE ACTIONS & BACKUP
+  // -------------------------------------------------------------
+  async function handleStoreAllExplicit() {
+    const res = await batchSync.flushPending();
+    if (res.success) {
+      toast.success("All Menu Details Stored in Database!", {
+        description: `Committed ${activeItems.length} active dishes across ${activeCategories.length} categories.`,
+      });
+    } else {
+      toast.error("Database storage failed", { description: res.message });
     }
   }
 
-  // Step helpers to move items/categories directly up or down
-  function moveItemStep(idx: number, direction: -1 | 1) {
-    const targetIdx = idx + direction;
-    if (targetIdx < 0 || targetIdx >= filteredItems.length) return;
-    handleReorderItems(idx, targetIdx);
+  async function handleResetToDefaultMenu() {
+    if (!confirm("Reset database to authentic default menu dishes and categories?")) {
+      return;
+    }
+
+    setResettingDefaults(true);
+    try {
+      const res = await fetch("/api/menu/reset-defaults", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.categories && data.items) {
+          setCategories(data.categories);
+          setItems(data.items);
+          saveLocalMenuSnapshot(data.categories, data.items, "admin-panel", {
+            skipServerFetch: true,
+          });
+          toast.success("Database restored with full authentic Halal Ali Dine Inn menu!");
+        }
+      }
+    } catch (e) {
+      toast.error("Failed to reset default menu");
+    } finally {
+      setResettingDefaults(false);
+    }
   }
 
-  function moveCategoryStep(idx: number, direction: -1 | 1) {
-    const targetIdx = idx + direction;
-    if (targetIdx < 0 || targetIdx >= sortedCategories.length) return;
-    handleReorderCategories(idx, targetIdx);
+  function handleExportBackup() {
+    const payload = {
+      categories,
+      items,
+      export_date: new Date().toISOString(),
+      restaurant: "Halal Ali Dine Inn & Take Away",
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `halal-ali-menu-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Menu backup downloaded");
+  }
+
+  function handleCopySql() {
+    navigator.clipboard.writeText(SUPABASE_TRASH_SQL);
+    setCopiedSql(true);
+    toast.success("Supabase SQL schema copied to clipboard");
+    setTimeout(() => setCopiedSql(false), 2500);
   }
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-background text-primary">
-      {/* Top Header */}
-      <header className="sticky top-0 z-30 border-b border-border/80 bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2.5 sm:px-6 sm:py-3.5">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="grid size-8 sm:size-9 shrink-0 place-items-center rounded-lg bg-primary font-bold text-xs sm:text-sm text-primary-foreground shadow-xs">
-              A
+    <div className="min-h-screen bg-muted/10 pb-16">
+      {/* Header Bar */}
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-card/90 backdrop-blur-md shadow-xs">
+        <div className="container mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+              <UtensilsCrossed className="size-5" />
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <h1 className="font-serif text-sm sm:text-base font-bold text-foreground truncate">
-                  Halal Ali Dine Inn
-                </h1>
-                <Badge
-                  variant="outline"
-                  className="border-gold/40 text-[9px] sm:text-[10px] text-gold px-1.5 py-0"
-                >
-                  Admin
-                </Badge>
-                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 text-muted-foreground">
-                  {isSupabaseConfigured ? "Cloud Synced" : "Local Synced"}
-                </Badge>
-              </div>
-              <p className="text-[10px] sm:text-xs text-muted-foreground truncate max-w-[140px] xs:max-w-[200px] sm:max-w-none">
-                {session?.user?.email || "admin@halal-ali.com"}
-              </p>
+            <div>
+              <h1 className="text-base font-bold text-foreground leading-none font-serif">
+                Halal Ali Dine Inn
+              </h1>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Admin Management Portal</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Sync Status & Action Bar */}
+          <div className="flex items-center gap-2.5">
+            {/* Sync Status Indicator */}
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-border/80 bg-background/80">
+              {batchSync.isSaving ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin text-amber-500" />
+                  <span className="text-amber-600 dark:text-amber-400">Saving to DB...</span>
+                </>
+              ) : batchSync.lastError ? (
+                <>
+                  <AlertCircle className="size-3.5 text-destructive" />
+                  <span className="text-destructive">Sync Notice</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="size-3.5 text-emerald-500" />
+                  <span className="text-muted-foreground">
+                    {batchSync.lastSavedAt ? `Saved (${batchSync.lastSavedAt})` : "Database Synced"}
+                  </span>
+                </>
+              )}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleStoreAllExplicit}
+              disabled={batchSync.isSaving}
+              className="h-8 text-xs gap-1.5 font-medium border-border/80"
+              title="Commit all current menu items to database"
+            >
+              <HardDrive className="size-3.5 text-primary" />
+              Store All to DB
+            </Button>
+
             <Link
               to="/"
-              target="_blank"
-              className="inline-flex items-center gap-1 rounded-lg border border-border/70 bg-background px-2 sm:px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-              title="Open Live Website in New Tab"
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-lg border border-border/60 hover:bg-muted/40 transition-colors"
             >
-              <ExternalLink className="size-3 text-muted-foreground" />
-              <span className="hidden xs:inline">Website</span>
+              <ExternalLink className="size-3.5" />
+              <span className="hidden md:inline">View Website</span>
             </Link>
 
             <Button
               variant="ghost"
               size="sm"
               onClick={onSignOut}
-              className="h-8 px-2 sm:px-3 gap-1 text-xs text-muted-foreground hover:text-destructive"
-              title="Sign Out"
+              className="h-8 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 gap-1"
             >
               <LogOut className="size-3.5" />
               <span className="hidden sm:inline">Sign Out</span>
@@ -1117,613 +553,370 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl w-full px-3 py-3 sm:px-6 sm:py-6 overflow-x-hidden">
-        {/* Menu Database Storage Management Card */}
-        <div className="mb-4 sm:mb-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 sm:p-5 shadow-2xs">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
-            <div className="flex items-start sm:items-center gap-3">
-              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                <Database className="size-5" />
-              </div>
+      {/* Main Container */}
+      <main className="container mx-auto px-4 sm:px-6 pt-6 space-y-6">
+        {/* Metrics Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+          <Card className="border-border/60 shadow-xs">
+            <CardContent className="p-3.5 sm:p-4 flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-sm sm:text-base font-bold text-foreground">
-                    Menu Database Storage
-                  </h2>
-                  <Badge
-                    variant="outline"
-                    className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] gap-1 px-2 py-0.5"
-                  >
-                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Database Active ({activeItems.length} Dishes, {activeCategories.length}{" "}
-                    Categories)
-                  </Badge>
-                  {isSupabaseConfigured ? (
-                    <Badge variant="secondary" className="text-[10px] text-muted-foreground">
-                      Supabase Cloud Connected
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="text-[10px] text-muted-foreground">
-                      Server File DB (data/menu-db.json)
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  All menu details (dishes, descriptions, prices, categories, images) are persisted
-                  to the database.
-                  {lastSavedTimestamp && (
-                    <span className="ml-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                      • Last stored: {lastSavedTimestamp}
-                    </span>
-                  )}
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Dishes
                 </p>
+                <h3 className="text-xl font-bold text-foreground mt-0.5">{totalDishes}</h3>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  {inStockDishes} in stock
+                </span>
               </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap shrink-0">
-              <Button
-                size="sm"
-                onClick={handleStoreAllToDatabase}
-                disabled={savingToDb}
-                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs h-9 px-3.5"
-                title="Store and persist all menu details to the database"
-              >
-                {savingToDb ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Save className="size-3.5" />
-                )}
-                <span>{savingToDb ? "Storing to DB..." : "Store All to Database"}</span>
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => exportDatabaseBackup(categories, items)}
-                className="gap-1.5 text-xs h-9 px-3 border-border/80"
-                title="Download JSON backup of all stored menu details"
-              >
-                <Download className="size-3.5 text-muted-foreground" />
-                <span className="hidden sm:inline">Export JSON</span>
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowDbModal(true)}
-                className="gap-1.5 text-xs h-9 px-3 border-border/80"
-                title="View Database Details and Stats"
-              >
-                <HardDrive className="size-3.5 text-muted-foreground" />
-                <span className="hidden sm:inline">DB Details</span>
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleResetToDefaults}
-                disabled={savingToDb}
-                className="gap-1 text-xs h-9 px-2 text-muted-foreground hover:text-amber-500"
-                title="Re-seed database with default authentic menu details"
-              >
-                <RotateCcw className="size-3.5" />
-                <span className="hidden xl:inline">Reset Defaults</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric Overview Cards */}
-        <div className="mb-4 sm:mb-6 grid grid-cols-3 gap-2.5 sm:gap-4">
-          <div className="rounded-xl border border-border/60 bg-card p-3 sm:p-5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Dishes</p>
-              <div className="grid size-7 sm:size-9 place-items-center rounded-lg bg-primary/10 text-primary">
-                <UtensilsCrossed className="size-3.5 sm:size-4" />
+              <div className="p-2.5 rounded-xl bg-primary/10 text-primary">
+                <UtensilsCrossed className="size-5" />
               </div>
-            </div>
-            <p className="mt-1 font-serif text-xl sm:text-2xl font-bold text-foreground">
-              {activeItems.length}
-            </p>
-            <p className="mt-0.5 text-[10px] sm:text-xs text-muted-foreground hidden xs:block">
-              Live menu items
-            </p>
-          </div>
+            </CardContent>
+          </Card>
 
-          <div className="rounded-xl border border-border/60 bg-card p-3 sm:p-5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Categories</p>
-              <div className="grid size-7 sm:size-9 place-items-center rounded-lg bg-primary/10 text-primary">
-                <Layers className="size-3.5 sm:size-4" />
-              </div>
-            </div>
-            <p className="mt-1 font-serif text-xl sm:text-2xl font-bold text-foreground">
-              {activeCategories.length}
-            </p>
-            <p className="mt-0.5 text-[10px] sm:text-xs text-muted-foreground hidden xs:block">
-              Menu sections
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-border/60 bg-card p-3 sm:p-5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Trash (30d)</p>
-              <div
-                className={`grid size-7 sm:size-9 place-items-center rounded-lg ${
-                  trashedItems.length + trashedCategories.length > 0
-                    ? "bg-amber-500/10 text-amber-500"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                <Trash2 className="size-3.5 sm:size-4" />
-              </div>
-            </div>
-            <p className="mt-1 font-serif text-xl sm:text-2xl font-bold text-foreground">
-              {trashedItems.length + trashedCategories.length}
-            </p>
-            <p className="mt-0.5 text-[10px] sm:text-xs text-muted-foreground hidden xs:block">
-              Auto-purges in 30 days
-            </p>
-          </div>
-        </div>
-
-        {dbTableError && (
-          <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 sm:p-4 text-amber-800 dark:text-amber-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <AlertCircle className="size-5 shrink-0 text-amber-500 mt-0.5" />
+          <Card className="border-border/60 shadow-xs">
+            <CardContent className="p-3.5 sm:p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs sm:text-sm font-semibold text-foreground">
-                  Supabase Database Setup Required
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Categories
                 </p>
-                <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
-                  The <code className="text-foreground">categories</code> and{" "}
-                  <code className="text-foreground">menu_items</code> tables need to be created in
-                  your Supabase project.
-                </p>
+                <h3 className="text-xl font-bold text-foreground mt-0.5">{totalCategories}</h3>
+                <span className="text-[10px] text-muted-foreground font-medium">
+                  Active sections
+                </span>
               </div>
-            </div>
-            <Button
-              size="sm"
-              onClick={() => {
-                navigator.clipboard.writeText(SUPABASE_TRASH_SQL);
-                setCopiedSql(true);
-                toast.success("Complete Supabase SQL script copied!");
-                setTimeout(() => setCopiedSql(false), 3000);
-              }}
-              className="shrink-0 gap-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-black font-semibold h-8"
-            >
-              {copiedSql ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-              {copiedSql ? "SQL Copied!" : "Copy Supabase SQL Setup"}
-            </Button>
-          </div>
-        )}
+              <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                <Layers className="size-5" />
+              </div>
+            </CardContent>
+          </Card>
 
-        {/* Navigation Tabs & Actions Bar */}
-        <div className="mb-4 sm:mb-5 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="grid grid-cols-4 w-full sm:w-auto sm:inline-flex items-center gap-1 rounded-xl bg-muted/60 p-1 border border-border/60 shadow-2xs">
-            <button
-              type="button"
-              onClick={() => handleSelectTab("items")}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-all ${
-                activeTab === "items"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <UtensilsCrossed className="size-3.5 shrink-0" />
-              <span className="truncate">Items ({activeItems.length})</span>
-            </button>
+          <Card className="border-border/60 shadow-xs">
+            <CardContent className="p-3.5 sm:p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Out of Stock
+                </p>
+                <h3
+                  className={`text-xl font-bold mt-0.5 ${
+                    outOfStockDishes > 0 ? "text-amber-500" : "text-foreground"
+                  }`}
+                >
+                  {outOfStockDishes}
+                </h3>
+                <span className="text-[10px] text-muted-foreground font-medium">
+                  {outOfStockDishes > 0 ? "Unavailable in menu" : "All available"}
+                </span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <AlertCircle className="size-5" />
+              </div>
+            </CardContent>
+          </Card>
 
-            <button
-              type="button"
-              onClick={() => handleSelectTab("categories")}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-all ${
-                activeTab === "categories"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Layers className="size-3.5 shrink-0" />
-              <span className="truncate">Categories ({activeCategories.length})</span>
-            </button>
+          <Card className="border-border/60 shadow-xs">
+            <CardContent className="p-3.5 sm:p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Promotions
+                </p>
+                <h3 className="text-xl font-bold text-foreground mt-0.5">Live</h3>
+                <span className="text-[10px] text-muted-foreground font-medium">Hero banner</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                <Sparkles className="size-5" />
+              </div>
+            </CardContent>
+          </Card>
 
-            <button
-              type="button"
-              onClick={() => handleSelectTab("special_offer")}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-all ${
-                activeTab === "special_offer"
-                  ? "bg-background text-gold shadow-xs ring-1 ring-gold/40 font-semibold"
-                  : "text-gold hover:text-gold hover:bg-gold/10"
-              }`}
-            >
-              <Tag className="size-3.5 shrink-0 text-gold" />
-              <span className="truncate">Offers</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSelectTab("trash")}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-all ${
-                activeTab === "trash"
-                  ? "bg-background text-amber-500 shadow-xs ring-1 ring-amber-500/40 font-semibold"
-                  : "text-muted-foreground hover:text-amber-500"
-              }`}
-            >
-              <Trash2 className="size-3.5 shrink-0" />
-              <span className="truncate">
-                Trash ({trashedItems.length + trashedCategories.length})
-              </span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
-            {activeTab === "items" && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditingItem(null);
-                  setItemDialogOpen(true);
-                }}
-                className="h-8 gap-1 bg-primary text-xs font-medium flex-1 sm:flex-none justify-center"
-              >
-                <Plus className="size-3.5" />
-                <span>Add Menu Item</span>
-              </Button>
-            )}
-
-            {activeTab === "categories" && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditingCategory(null);
-                  setCategoryDialogOpen(true);
-                }}
-                className="h-8 gap-1 bg-primary text-xs font-medium flex-1 sm:flex-none justify-center"
-              >
-                <Plus className="size-3.5" />
-                <span>Add Category</span>
-              </Button>
-            )}
-          </div>
+          <Card className="border-border/60 shadow-xs col-span-2 sm:col-span-4 lg:col-span-1">
+            <CardContent className="p-3.5 sm:p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Trash Bin
+                </p>
+                <h3 className="text-xl font-bold text-foreground mt-0.5">{totalTrash}</h3>
+                <span className="text-[10px] text-muted-foreground font-medium">
+                  30-day retention
+                </span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                <Trash2 className="size-5" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* TAB 1: MENU ITEMS */}
-        {activeTab === "items" && (
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-border/60">
+          <Button
+            variant={activeTab === "dishes" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("dishes")}
+            className="text-xs h-9 gap-1.5 font-medium shrink-0"
+          >
+            <UtensilsCrossed className="size-4" />
+            Menu & Dishes ({totalDishes})
+          </Button>
+
+          <Button
+            variant={activeTab === "categories" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("categories")}
+            className="text-xs h-9 gap-1.5 font-medium shrink-0"
+          >
+            <Layers className="size-4" />
+            Categories ({totalCategories})
+          </Button>
+
+          <Button
+            variant={activeTab === "offers" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("offers")}
+            className="text-xs h-9 gap-1.5 font-medium shrink-0"
+          >
+            <Sparkles className="size-4" />
+            Special Offers & Banner
+          </Button>
+
+          <Button
+            variant={activeTab === "hours" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("hours")}
+            className="text-xs h-9 gap-1.5 font-medium shrink-0"
+          >
+            <Clock className="size-4" />
+            Operating Hours & Status
+          </Button>
+
+          <Button
+            variant={activeTab === "trash" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("trash")}
+            className="text-xs h-9 gap-1.5 font-medium shrink-0"
+          >
+            <Trash2 className="size-4" />
+            Trash Bin ({totalTrash})
+          </Button>
+
+          <Button
+            variant={activeTab === "database" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("database")}
+            className="text-xs h-9 gap-1.5 font-medium shrink-0"
+          >
+            <Database className="size-4" />
+            Database & Backups
+          </Button>
+        </div>
+
+        {/* TAB 1: MENU & DISHES */}
+        {activeTab === "dishes" && (
           <div className="space-y-4">
-            {/* Search Bar */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search dishes by name or description..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8 pl-8 text-xs border-border/70"
-                />
+            {/* Action Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card p-3 rounded-xl border border-border/60 shadow-xs">
+              <div className="flex flex-wrap items-center gap-2 flex-1">
+                {/* Search */}
+                <div className="relative min-w-[200px] flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search dishes..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-8 h-8 text-xs bg-background"
+                  />
+                </div>
+
+                {/* Category Filter */}
+                <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
+                  <SelectTrigger className="h-8 text-xs w-[160px] bg-background">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {activeCategories.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Availability Filter */}
+                <Select
+                  value={availabilityFilter}
+                  onValueChange={(val) =>
+                    setAvailabilityFilter(val as "all" | "available" | "unavailable")
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs w-[130px] bg-background">
+                    <SelectValue placeholder="Availability" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="available">In Stock</SelectItem>
+                    <SelectItem value="unavailable">Out of Stock</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+
+              {/* Add Dish Button */}
+              <Button
+                size="sm"
+                onClick={() => {
+                  setSelectedItemForEdit(null);
+                  setItemModalOpen(true);
+                }}
+                className="h-8 text-xs gap-1.5 bg-primary text-primary-foreground font-medium shrink-0"
+              >
+                <Plus className="size-3.5" />
+                Add New Dish
+              </Button>
             </div>
 
-            {loading ? (
-              <div className="rounded-xl border border-border/60 bg-card p-12 text-center text-xs text-muted-foreground">
-                <Loader2 className="mx-auto size-6 animate-spin text-gold mb-2" />
-                Loading menu items...
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/60 bg-card p-8 text-center">
-                <UtensilsCrossed className="mx-auto size-8 text-muted-foreground/50 mb-2" />
-                <p className="text-xs font-medium text-foreground">No dishes found</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {searchQuery
-                    ? "Try adjusting your search query or category filter."
-                    : "Get started by adding your first dish to the menu."}
-                </p>
-                <div className="mt-3 flex justify-center gap-2">
-                  {searchQuery && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSearchQuery("")}
-                      className="h-7 text-xs"
-                    >
-                      Clear Search
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditingItem(null);
-                      setItemDialogOpen(true);
-                    }}
-                    className="h-7 text-xs gap-1"
-                  >
-                    <Plus className="size-3" />
-                    Add Dish
-                  </Button>
+            {/* Dishes List */}
+            {filteredItems.length === 0 ? (
+              <Card className="border-dashed p-10 text-center">
+                <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground mb-3">
+                  <UtensilsCrossed className="size-6" />
                 </div>
-              </div>
+                <h3 className="text-sm font-semibold text-foreground">No Dishes Found</h3>
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                  {searchQuery || selectedCategoryFilter !== "all"
+                    ? "Try adjusting your search query or filters."
+                    : "Get started by adding dishes to your menu."}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedCategoryFilter("all");
+                    setSearchQuery("");
+                    setAvailabilityFilter("all");
+                  }}
+                  className="mt-3 h-8 text-xs"
+                >
+                  Reset Filters
+                </Button>
+              </Card>
             ) : (
-              <>
-                {/* MOBILE VIEW: Thin, refined vertical cards */}
-                <div className="space-y-2 md:hidden">
-                  {filteredItems.map((item, idx) => (
+              <div className="divide-y divide-border/60 rounded-xl border border-border/60 bg-card overflow-hidden shadow-xs">
+                {filteredItems.map((dish) => {
+                  const cat = categories.find((c) => c.id === dish.category_id);
+                  return (
                     <div
-                      key={item.id}
-                      className={`rounded-lg border p-2.5 transition-colors ${
-                        item.available === false
-                          ? "border-border/40 bg-card/60 opacity-80"
-                          : "border-border/60 bg-card hover:border-gold/30"
-                      }`}
+                      key={dish.id}
+                      className="p-3.5 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-muted/20 transition-colors"
                     >
-                      <div className="flex items-center gap-2.5">
-                        {/* Sort Step Buttons */}
-                        <div className="flex flex-col items-center gap-0.5 shrink-0">
-                          <button
-                            type="button"
-                            disabled={idx === 0}
-                            onClick={() => moveItemStep(idx, -1)}
-                            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
-                            title="Move up"
-                            aria-label={`Move ${item.name} up`}
-                          >
-                            <ChevronUp className="size-3.5" />
-                          </button>
+                      {/* Left: Image & Info */}
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        {dish.image_url ? (
+                          <img
+                            src={dish.image_url}
+                            alt={dish.name}
+                            className="size-14 rounded-lg object-cover border border-border shrink-0"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = "none";
+                            }}
+                          />
+                        ) : (
+                          <div className="size-14 rounded-lg bg-muted flex items-center justify-center shrink-0 border border-border/60">
+                            <UtensilsCrossed className="size-6 text-muted-foreground" />
+                          </div>
+                        )}
 
-                          <span className="text-[10px] font-mono text-muted-foreground/70 font-medium">
-                            #{idx + 1}
-                          </span>
-
-                          <button
-                            type="button"
-                            disabled={idx === filteredItems.length - 1}
-                            onClick={() => moveItemStep(idx, 1)}
-                            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
-                            title="Move down"
-                            aria-label={`Move ${item.name} down`}
-                          >
-                            <ChevronDown className="size-3.5" />
-                          </button>
-                        </div>
-
-                        {/* Thumbnail Image */}
-                        <div className="size-11 shrink-0 overflow-hidden rounded-md border border-border/50 bg-muted">
-                          {item.image_url ? (
-                            <img
-                              src={item.image_url}
-                              alt={item.name}
-                              className="size-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <div className="grid size-full place-items-center text-muted-foreground">
-                              <ImageIcon className="size-3.5 opacity-40" />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Thin Item Details */}
                         <div className="min-w-0 flex-1">
-                          <h4 className="font-medium text-xs text-foreground leading-snug truncate">
-                            {item.name}
-                          </h4>
-                          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-                            <span className="font-semibold text-gold text-xs shrink-0">
-                              {formatPrice(item.price)}
-                            </span>
-                            <span className="text-muted-foreground text-[10px] shrink-0">•</span>
-                            <span className="inline-flex rounded bg-muted/80 px-1.5 py-0.2 text-[10px] font-normal text-muted-foreground truncate max-w-[100px]">
-                              {item.category_id
-                                ? categoryMap.get(item.category_id) || "Category"
-                                : "Category"}
-                            </span>
-                            {/* 1-tap Active/Inactive toggle button */}
-                            <button
-                              type="button"
-                              onClick={() => handleToggleItemVisibility(item)}
-                              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
-                                item.available !== false
-                                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"
-                                  : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
-                              }`}
-                              title={`Click to mark ${item.available !== false ? "Inactive" : "Active"}`}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold text-foreground">{dish.name}</span>
+                            {cat && (
+                              <Badge variant="secondary" className="text-[10px] font-medium">
+                                {cat.name}
+                              </Badge>
+                            )}
+                            <Badge
+                              variant={dish.available ? "default" : "destructive"}
+                              className="text-[10px]"
                             >
-                              {item.available !== false ? (
-                                <>
-                                  <span className="size-1.5 rounded-full bg-emerald-500" />
-                                  <span>Active</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="size-1.5 rounded-full bg-muted-foreground/60" />
-                                  <span>Inactive</span>
-                                </>
-                              )}
-                            </button>
+                              {dish.available ? "In Stock" : "Out of Stock"}
+                            </Badge>
+                          </div>
+
+                          {dish.description && (
+                            <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
+                              {dish.description}
+                            </p>
+                          )}
+
+                          <div className="text-xs font-bold text-primary mt-1">
+                            £{Number(dish.price || 0).toFixed(2)}
                           </div>
                         </div>
+                      </div>
 
-                        {/* Actions */}
-                        <div className="flex items-center gap-1 shrink-0">
+                      {/* Right: Actions */}
+                      <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-border/60">
+                        {/* Quick In-Stock Switch */}
+                        <div className="flex items-center gap-1.5 pr-2 border-r border-border/60">
+                          <span className="text-[11px] text-muted-foreground hidden md:inline">
+                            Available:
+                          </span>
+                          <Switch
+                            checked={dish.available}
+                            onCheckedChange={() => handleToggleDishAvailable(dish)}
+                          />
+                        </div>
+
+                        {/* Reorder Buttons */}
+                        <div className="flex items-center">
                           <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => {
-                              setEditingItem(item);
-                              setItemDialogOpen(true);
-                            }}
-                            className="h-7 px-2 text-[11px] font-medium"
-                            title="Edit Dish"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleMoveDish(dish, "up")}
+                            className="size-7 text-muted-foreground hover:text-foreground"
+                            title="Move Up"
                           >
-                            <Edit2 className="size-3" />
-                            <span className="hidden xs:inline ml-1">Edit</span>
+                            <ChevronUp className="size-3.5" />
                           </Button>
-
                           <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleTrashItem(item)}
-                            className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
-                            title="Move Dish to Trash"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleMoveDish(dish, "down")}
+                            className="size-7 text-muted-foreground hover:text-foreground"
+                            title="Move Down"
                           >
-                            <Trash2 className="size-3" />
+                            <ChevronDown className="size-3.5" />
                           </Button>
                         </div>
+
+                        {/* Edit Button */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedItemForEdit(dish);
+                            setItemModalOpen(true);
+                          }}
+                          className="h-7 text-xs gap-1"
+                        >
+                          <Edit2 className="size-3" />
+                          Edit
+                        </Button>
+
+                        {/* Trash Button */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleTrashDish(dish)}
+                          className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          title="Move to Trash"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
                       </div>
                     </div>
-                  ))}
-                </div>
-
-                {/* DESKTOP VIEW: Sleek Table with thin rows and Order Step Buttons */}
-                <div className="hidden md:block overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xs">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="border-b border-border/60 bg-muted/30 font-medium text-muted-foreground">
-                        <tr>
-                          <th className="w-14 px-3 py-2.5 text-center font-normal">Order</th>
-                          <th className="px-3 py-2.5 w-14">Image</th>
-                          <th className="px-4 py-2.5">Dish Name</th>
-                          <th className="px-4 py-2.5">Category</th>
-                          <th className="px-4 py-2.5">Price (₹)</th>
-                          <th className="px-4 py-2.5 text-center">Visibility</th>
-                          <th className="px-4 py-2.5 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {filteredItems.map((item, idx) => (
-                          <tr
-                            key={item.id}
-                            className={`transition-colors hover:bg-muted/20 ${
-                              item.available === false ? "opacity-75 bg-muted/10" : ""
-                            }`}
-                          >
-                            {/* Order Step Buttons */}
-                            <td className="w-14 px-2 py-2 text-center align-middle">
-                              <div className="inline-flex items-center gap-1">
-                                <span className="text-[10px] font-mono text-muted-foreground w-4 text-right">
-                                  #{idx + 1}
-                                </span>
-                                <div className="flex flex-col gap-0.5">
-                                  <button
-                                    type="button"
-                                    disabled={idx === 0}
-                                    onClick={() => moveItemStep(idx, -1)}
-                                    className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
-                                    title="Move up"
-                                    aria-label={`Move ${item.name} up`}
-                                  >
-                                    <ChevronUp className="size-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={idx === filteredItems.length - 1}
-                                    onClick={() => moveItemStep(idx, 1)}
-                                    className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
-                                    title="Move down"
-                                    aria-label={`Move ${item.name} down`}
-                                  >
-                                    <ChevronDown className="size-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* Dish Image */}
-                            <td className="px-3 py-2">
-                              <div className="size-10 overflow-hidden rounded-md border border-border/50 bg-muted">
-                                {item.image_url ? (
-                                  <img
-                                    src={item.image_url}
-                                    alt={item.name}
-                                    className="size-full object-cover"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <div className="grid size-full place-items-center text-muted-foreground">
-                                    <ImageIcon className="size-3.5 opacity-40" />
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* Name */}
-                            <td className="px-4 py-2 max-w-sm">
-                              <p className="font-medium text-foreground text-xs">{item.name}</p>
-                            </td>
-
-                            {/* Category Badge */}
-                            <td className="px-4 py-2 whitespace-nowrap">
-                              <span className="inline-flex rounded bg-muted/80 px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
-                                {item.category_id
-                                  ? categoryMap.get(item.category_id) || "Category"
-                                  : "Category"}
-                              </span>
-                            </td>
-
-                            {/* Price */}
-                            <td className="px-4 py-2 font-semibold text-gold text-xs whitespace-nowrap">
-                              {formatPrice(item.price)}
-                            </td>
-
-                            {/* 1-tap Visibility toggle */}
-                            <td className="px-4 py-2 text-center whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleItemVisibility(item)}
-                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
-                                  item.available !== false
-                                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 shadow-2xs"
-                                    : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
-                                }`}
-                                title={`Click to toggle: currently ${item.available !== false ? "Active" : "Inactive"}`}
-                              >
-                                {item.available !== false ? (
-                                  <>
-                                    <span className="size-1.5 rounded-full bg-emerald-500" />
-                                    <span>Active</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="size-1.5 rounded-full bg-muted-foreground/60" />
-                                    <span>Inactive</span>
-                                  </>
-                                )}
-                              </button>
-                            </td>
-
-                            {/* Edit / Delete Buttons */}
-                            <td className="px-4 py-2 text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setEditingItem(item);
-                                    setItemDialogOpen(true);
-                                  }}
-                                  className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
-                                  title="Edit Dish"
-                                >
-                                  <Edit2 className="size-3" />
-                                  <span className="hidden sm:inline">Edit</span>
-                                </Button>
-
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleTrashItem(item)}
-                                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                  title="Move Dish to Trash"
-                                >
-                                  <Trash2 className="size-3" />
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
@@ -1731,478 +924,226 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         {/* TAB 2: CATEGORIES */}
         {activeTab === "categories" && (
           <div className="space-y-4">
-            {sortedCategories.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/60 bg-card p-8 text-center">
-                <Layers className="mx-auto size-8 text-muted-foreground/50 mb-2" />
-                <p className="text-xs font-medium text-foreground">No categories found</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Categories organize dishes into distinct sections.
+            <div className="flex items-center justify-between bg-card p-3 rounded-xl border border-border/60 shadow-xs">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Menu Categories</h3>
+                <p className="text-xs text-muted-foreground">
+                  Organize dishes into sections shown on the restaurant menu.
                 </p>
-                <div className="mt-3 flex justify-center">
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditingCategory(null);
-                      setCategoryDialogOpen(true);
-                    }}
-                    className="h-7 text-xs gap-1"
-                  >
-                    <Plus className="size-3" />
-                    Add Category
-                  </Button>
-                </div>
               </div>
-            ) : (
-              <>
-                {/* MOBILE VIEW: Thin category cards */}
-                <div className="space-y-2 md:hidden">
-                  {sortedCategories.map((cat, idx) => {
-                    const count = activeItems.filter((i) => i.category_id === cat.id).length;
-                    return (
-                      <div
-                        key={cat.id}
-                        className={`rounded-lg border p-2.5 transition-colors ${
-                          cat.available === false
-                            ? "border-border/40 bg-card/60 opacity-80"
-                            : "border-border/60 bg-card hover:border-gold/30"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          {/* Order Step Buttons */}
-                          <div className="flex flex-col items-center gap-0.5 shrink-0">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveCategoryStep(idx, -1)}
-                              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
-                              title="Move up"
-                              aria-label={`Move category ${cat.name} up`}
-                            >
-                              <ChevronUp className="size-3.5" />
-                            </button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setSelectedCategoryForEdit(null);
+                  setCategoryModalOpen(true);
+                }}
+                className="h-8 text-xs gap-1.5 bg-primary text-primary-foreground font-medium"
+              >
+                <Plus className="size-3.5" />
+                Add Category
+              </Button>
+            </div>
 
-                            <span className="text-[10px] font-mono text-muted-foreground/70 font-medium">
-                              #{idx + 1}
-                            </span>
-
-                            <button
-                              type="button"
-                              disabled={idx === sortedCategories.length - 1}
-                              onClick={() => moveCategoryStep(idx, 1)}
-                              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
-                              title="Move down"
-                              aria-label={`Move category ${cat.name} down`}
-                            >
-                              <ChevronDown className="size-3.5" />
-                            </button>
-                          </div>
-
-                          {/* Category Details */}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <h4 className="font-medium text-xs text-foreground truncate">
-                                {cat.name}
-                              </h4>
-                              {isShopCategory(cat) && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] px-1.5 py-0 font-medium text-amber-500 border-amber-500/40 bg-amber-500/10 shrink-0"
-                                >
-                                  Shop (Excluded)
-                                </Badge>
-                              )}
-                              <Badge
-                                variant="secondary"
-                                className="text-[9px] px-1.5 py-0 font-normal shrink-0"
-                              >
-                                {count} {count === 1 ? "item" : "items"}
-                              </Badge>
-
-                              {/* 1-tap Active/Inactive toggle button */}
-                              <button
-                                type="button"
-                                onClick={() => handleToggleCategoryVisibility(cat)}
-                                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
-                                  cat.available !== false
-                                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"
-                                    : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
-                                }`}
-                                title={`Click to mark ${cat.available !== false ? "Inactive" : "Active"}`}
-                              >
-                                {cat.available !== false ? (
-                                  <>
-                                    <span className="size-1.5 rounded-full bg-emerald-500" />
-                                    <span>Active</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="size-1.5 rounded-full bg-muted-foreground/60" />
-                                    <span>Inactive</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                            <p className="mt-0.5 font-mono text-[10px] text-muted-foreground truncate">
-                              /{cat.slug}
-                            </p>
-                          </div>
-
-                          {/* Actions */}
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => {
-                                setEditingCategory(cat);
-                                setCategoryDialogOpen(true);
-                              }}
-                              className="h-7 px-2 text-[11px] font-medium"
-                              title="Edit Category"
-                            >
-                              <Edit2 className="size-3" />
-                              <span className="hidden xs:inline ml-1">Edit</span>
-                            </Button>
-
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleTrashCategory(cat)}
-                              className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
-                              title="Move Category to Trash"
-                            >
-                              <Trash2 className="size-3" />
-                            </Button>
-                          </div>
-                        </div>
+            <div className="divide-y divide-border/60 rounded-xl border border-border/60 bg-card overflow-hidden shadow-xs">
+              {activeCategories.map((cat, idx) => {
+                const dishCount = activeItems.filter((i) => i.category_id === cat.id).length;
+                return (
+                  <div
+                    key={cat.id}
+                    className="p-3.5 sm:px-4 flex items-center justify-between gap-3 hover:bg-muted/20 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-muted text-foreground font-mono text-xs font-bold w-9 text-center">
+                        {idx + 1}
                       </div>
-                    );
-                  })}
-                </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-foreground">{cat.name}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {dishCount} dishes
+                          </Badge>
+                          {cat.available === false && (
+                            <Badge variant="destructive" className="text-[10px]">
+                              Hidden
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="text-[11px] font-mono text-muted-foreground block mt-0.5">
+                          slug: {cat.slug}
+                        </span>
+                      </div>
+                    </div>
 
-                {/* DESKTOP VIEW: Sleek Table */}
-                <div className="hidden md:block rounded-xl border border-border/60 bg-card shadow-2xs overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="border-b border-border/60 bg-muted/30 font-medium text-muted-foreground">
-                        <tr>
-                          <th className="w-14 px-3 py-2.5 text-center font-normal">Order</th>
-                          <th className="px-4 py-2.5">Category Name</th>
-                          <th className="px-4 py-2.5">URL Slug</th>
-                          <th className="px-4 py-2.5">Items Count</th>
-                          <th className="px-4 py-2.5 text-center">Visibility</th>
-                          <th className="px-4 py-2.5 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {sortedCategories.map((cat, idx) => {
-                          const count = activeItems.filter((i) => i.category_id === cat.id).length;
-                          return (
-                            <tr
-                              key={cat.id}
-                              className={`transition-colors hover:bg-muted/20 ${
-                                cat.available === false ? "opacity-75 bg-muted/10" : ""
-                              }`}
-                            >
-                              {/* Order Step Buttons */}
-                              <td className="w-14 px-2 py-2 text-center align-middle">
-                                <div className="inline-flex items-center gap-1">
-                                  <span className="text-[10px] font-mono text-muted-foreground w-4 text-right">
-                                    #{idx + 1}
-                                  </span>
-                                  <div className="flex flex-col gap-0.5">
-                                    <button
-                                      type="button"
-                                      disabled={idx === 0}
-                                      onClick={() => moveCategoryStep(idx, -1)}
-                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
-                                      title="Move up"
-                                      aria-label={`Move category ${cat.name} up`}
-                                    >
-                                      <ChevronUp className="size-3" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={idx === sortedCategories.length - 1}
-                                      onClick={() => moveCategoryStep(idx, 1)}
-                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
-                                      title="Move down"
-                                      aria-label={`Move category ${cat.name} down`}
-                                    >
-                                      <ChevronDown className="size-3" />
-                                    </button>
-                                  </div>
-                                </div>
-                              </td>
+                    <div className="flex items-center gap-1.5">
+                      {/* Move Up/Down */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={idx === 0}
+                        onClick={() => handleMoveCategory(idx, "up")}
+                        className="size-7 text-muted-foreground hover:text-foreground"
+                        title="Move Up"
+                      >
+                        <ChevronUp className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={idx === activeCategories.length - 1}
+                        onClick={() => handleMoveCategory(idx, "down")}
+                        className="size-7 text-muted-foreground hover:text-foreground"
+                        title="Move Down"
+                      >
+                        <ChevronDown className="size-3.5" />
+                      </Button>
 
-                              <td className="px-4 py-2 font-medium text-foreground text-xs">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span>{cat.name}</span>
-                                  {isShopCategory(cat) && (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[9px] px-1.5 py-0 font-medium text-amber-500 border-amber-500/40 bg-amber-500/10 shrink-0"
-                                    >
-                                      Shop (Excluded)
-                                    </Badge>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-4 py-2 font-mono text-muted-foreground text-[11px]">
-                                /{cat.slug}
-                              </td>
-                              <td className="px-4 py-2">
-                                <Badge
-                                  variant="secondary"
-                                  className="text-[10px] font-normal px-1.5 py-0"
-                                >
-                                  {count} {count === 1 ? "item" : "items"}
-                                </Badge>
-                              </td>
+                      {/* Edit */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedCategoryForEdit(cat);
+                          setCategoryModalOpen(true);
+                        }}
+                        className="h-7 text-xs gap-1"
+                      >
+                        <Edit2 className="size-3" />
+                        Edit
+                      </Button>
 
-                              {/* 1-tap Visibility toggle */}
-                              <td className="px-4 py-2 text-center whitespace-nowrap">
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleCategoryVisibility(cat)}
-                                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
-                                    cat.available !== false
-                                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 shadow-2xs"
-                                      : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
-                                  }`}
-                                  title={`Click to toggle: currently ${cat.available !== false ? "Active" : "Inactive"}`}
-                                >
-                                  {cat.available !== false ? (
-                                    <>
-                                      <span className="size-1.5 rounded-full bg-emerald-500" />
-                                      <span>Active</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="size-1.5 rounded-full bg-muted-foreground/60" />
-                                      <span>Inactive</span>
-                                    </>
-                                  )}
-                                </button>
-                              </td>
-
-                              <td className="px-4 py-2 text-right">
-                                <div className="flex items-center justify-end gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setEditingCategory(cat);
-                                      setCategoryDialogOpen(true);
-                                    }}
-                                    className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
-                                    title="Edit Category"
-                                  >
-                                    <Edit2 className="size-3" />
-                                    <span className="hidden sm:inline">Edit</span>
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleTrashCategory(cat)}
-                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                    title="Move Category to Trash"
-                                  >
-                                    <Trash2 className="size-3" />
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                      {/* Trash */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleTrashCategory(cat)}
+                        className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        title="Move to Trash"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              </>
-            )}
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* TAB 3: SPECIAL OFFER / COMBO BANNER */}
-        {activeTab === "special_offer" && <SpecialOfferManager />}
+        {/* TAB 3: SPECIAL OFFERS */}
+        {activeTab === "offers" && <SpecialOfferManager />}
 
-        {/* TAB 4: TRASH & RECYCLE BIN (30-DAY AUTO PURGE) */}
+        {/* TAB 4: OPERATING HOURS & ANNOUNCEMENTS */}
+        {activeTab === "hours" && <OpeningHoursManager />}
+
+        {/* TAB 5: TRASH BIN */}
         {activeTab === "trash" && (
           <TrashManager
-            trashedItems={trashedItems}
             trashedCategories={trashedCategories}
-            categoryMap={categoryMap}
-            onRestoreItem={handleRestoreItem}
+            trashedItems={trashedItems}
             onRestoreCategory={handleRestoreCategory}
-            onPermanentDeleteItem={handlePermanentDeleteItem}
+            onRestoreItem={handleRestoreDish}
             onPermanentDeleteCategory={handlePermanentDeleteCategory}
-            onEmptyTrash={handleEmptyTrash}
+            onPermanentDeleteItem={handlePermanentDeleteDish}
+            onEmptyAllTrash={handleEmptyAllTrash}
           />
+        )}
+
+        {/* TAB 6: DATABASE & BACKUPS */}
+        {activeTab === "database" && (
+          <div className="space-y-6">
+            <Card className="border-border/60">
+              <CardHeader>
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                  <Database className="size-4 text-primary" />
+                  Database Synchronization & Backups
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Backup export */}
+                  <div className="p-4 rounded-xl border border-border/60 bg-card space-y-2">
+                    <span className="text-xs font-semibold block">Download JSON Backup</span>
+                    <p className="text-[11px] text-muted-foreground">
+                      Save a complete JSON snapshot of all dishes, categories, and settings.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportBackup}
+                      className="w-full text-xs gap-1.5 h-8 mt-2"
+                    >
+                      <Download className="size-3.5" />
+                      Download Backup
+                    </Button>
+                  </div>
+
+                  {/* Seed / Reset default */}
+                  <div className="p-4 rounded-xl border border-border/60 bg-card space-y-2">
+                    <span className="text-xs font-semibold block">Restore Default Menu</span>
+                    <p className="text-[11px] text-muted-foreground">
+                      Reset database to the curated Halal Ali Dine Inn restaurant dishes.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={resettingDefaults}
+                      onClick={handleResetToDefaultMenu}
+                      className="w-full text-xs gap-1.5 h-8 mt-2 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
+                    >
+                      <RotateCcw className="size-3.5" />
+                      {resettingDefaults ? "Restoring..." : "Restore Default Menu"}
+                    </Button>
+                  </div>
+
+                  {/* Supabase SQL Helper */}
+                  <div className="p-4 rounded-xl border border-border/60 bg-card space-y-2">
+                    <span className="text-xs font-semibold block">Supabase SQL Schema</span>
+                    <p className="text-[11px] text-muted-foreground">
+                      Copy SQL schema for PostgreSQL tables, storage buckets, and RLS policies.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopySql}
+                      className="w-full text-xs gap-1.5 h-8 mt-2"
+                    >
+                      {copiedSql ? (
+                        <>
+                          <Check className="size-3.5 text-emerald-500" />
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="size-3.5" />
+                          Copy Supabase SQL
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
       </main>
 
-      {/* Item Dialog */}
-      <MenuItemDialog
-        open={itemDialogOpen}
-        onOpenChange={setItemDialogOpen}
-        item={editingItem}
-        categories={activeCategories}
-        onSave={handleSaveItem}
-      />
-
-      {/* Category Dialog */}
+      {/* DIALOGS */}
       <CategoryDialog
-        open={categoryDialogOpen}
-        onOpenChange={setCategoryDialogOpen}
-        category={editingCategory}
+        open={categoryModalOpen}
+        onOpenChange={setCategoryModalOpen}
+        category={selectedCategoryForEdit}
         onSave={handleSaveCategory}
+        existingCount={activeCategories.length}
       />
 
-      {/* Database Details Dialog */}
-      <Dialog open={showDbModal} onOpenChange={setShowDbModal}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg">
-              <Database className="size-5 text-emerald-500" />
-              Menu Database Storage Details
-            </DialogTitle>
-            <DialogDescription>
-              Real-time inspection of menu details stored in the persistent database.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2 text-sm">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
-                <p className="text-xs text-muted-foreground">Stored Items</p>
-                <p className="text-xl font-bold font-serif text-foreground mt-0.5">
-                  {items.length}
-                </p>
-                <p className="text-[10px] text-muted-foreground">{activeItems.length} active</p>
-              </div>
-              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
-                <p className="text-xs text-muted-foreground">Categories</p>
-                <p className="text-xl font-bold font-serif text-foreground mt-0.5">
-                  {categories.length}
-                </p>
-                <p className="text-[10px] text-muted-foreground">{activeCategories.length} live</p>
-              </div>
-              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
-                <p className="text-xs text-muted-foreground">Server Database</p>
-                <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
-                  Active
-                </p>
-                <p className="text-[10px] text-muted-foreground font-mono">data/menu-db.json</p>
-              </div>
-              <div className="rounded-xl border border-border bg-muted/40 p-3 text-center">
-                <p className="text-xs text-muted-foreground">Supabase Sync</p>
-                <p className="text-xs font-semibold mt-1">
-                  {isSupabaseConfigured ? (
-                    <span className="text-emerald-600 dark:text-emerald-400">Connected</span>
-                  ) : (
-                    <span className="text-muted-foreground">Local fallback</span>
-                  )}
-                </p>
-                <p className="text-[10px] text-muted-foreground">Postgres Tables</p>
-              </div>
-            </div>
-
-            <div>
-              <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground mb-2">
-                Stored Categories & Dishes Breakdown
-              </h4>
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-border divide-y divide-border/60">
-                {activeCategories.map((cat) => {
-                  const catItems = activeItems.filter(
-                    (i) =>
-                      i.category_id === cat.id ||
-                      i.category_id === cat.slug ||
-                      i.category_id === `cat-${cat.slug}` ||
-                      (cat.slug && i.category_id?.includes(cat.slug)),
-                  );
-                  return (
-                    <div
-                      key={cat.id}
-                      className="flex items-center justify-between p-2.5 text-xs hover:bg-muted/30"
-                    >
-                      <div>
-                        <span className="font-medium text-foreground">{cat.name}</span>
-                        <span className="text-muted-foreground ml-2 text-[11px] font-mono">
-                          ({cat.slug || cat.id})
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-[10px]">
-                          {catItems.length} {catItems.length === 1 ? "dish" : "dishes"}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                        >
-                          Stored
-                        </Badge>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
-              <p className="font-semibold text-foreground mb-1">How Database Persistence Works:</p>
-              <ul className="list-disc pl-4 space-y-1">
-                <li>
-                  All details (item names, descriptions, prices, photos, categories) are saved
-                  directly in <code className="text-foreground">data/menu-db.json</code> on the
-                  server.
-                </li>
-                <li>
-                  The public menu (<code className="text-foreground">/menu</code> and home page)
-                  automatically reads from this database.
-                </li>
-                <li>
-                  Any new dishes or updates you make in this Admin Panel are immediately saved to
-                  the database file and synced across devices.
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/80">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                exportDatabaseBackup(categories, items);
-              }}
-              className="gap-1.5 text-xs"
-            >
-              <Download className="size-3.5" />
-              <span>Export Database JSON</span>
-            </Button>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="default"
-                size="sm"
-                onClick={async () => {
-                  await handleStoreAllToDatabase();
-                  setShowDbModal(false);
-                }}
-                disabled={savingToDb}
-                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-              >
-                {savingToDb ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Save className="size-3.5" />
-                )}
-                <span>Store All Now</span>
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <MenuItemDialog
+        open={itemModalOpen}
+        onOpenChange={setItemModalOpen}
+        item={selectedItemForEdit}
+        categories={activeCategories}
+        onSave={handleSaveDish}
+        existingCount={activeItems.length}
+      />
     </div>
   );
 }

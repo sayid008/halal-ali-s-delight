@@ -1,210 +1,193 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import type { DatabaseCategory } from "@/lib/supabase";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Eye, EyeOff } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { FolderPlus, Edit3, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-
-const isUUID = (str?: string | null): boolean =>
-  Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
 
 interface CategoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   category: DatabaseCategory | null;
-  onSave: (data: {
+  onSave: (categoryData: {
     id?: string;
     name: string;
     slug: string;
     sort_order: number;
     available: boolean;
-  }) => Promise<void>;
+  }) => void;
+  existingCount: number;
 }
 
-export function CategoryDialog({ open, onOpenChange, category, onSave }: CategoryDialogProps) {
+export function CategoryDialog({
+  open,
+  onOpenChange,
+  category,
+  onSave,
+  existingCount,
+}: CategoryDialogProps) {
+  const isEditing = Boolean(category);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [sortOrder, setSortOrder] = useState(0);
-  const [available, setAvailable] = useState<boolean>(true);
-  const [saving, setSaving] = useState(false);
+  const [available, setAvailable] = useState(true);
 
   useEffect(() => {
-    if (category) {
-      setName(category.name);
-      setSlug(category.slug);
-      setSortOrder(category.sort_order);
-      setAvailable(category.available !== false);
-    } else {
-      setName("");
-      setSlug("");
-      setSortOrder(0);
-      setAvailable(true);
+    if (open) {
+      if (category) {
+        setName(category.name || "");
+        setSlug(category.slug || "");
+        setSortOrder(category.sort_order ?? 0);
+        setAvailable(category.available !== false);
+      } else {
+        setName("");
+        setSlug("");
+        setSortOrder(existingCount);
+        setAvailable(true);
+      }
     }
-  }, [category, open]);
+  }, [open, category, existingCount]);
 
-  function handleNameChange(value: string) {
-    setName(value);
-    if (!category) {
-      // Auto generate slug for new categories
-      const autoSlug = value
+  function handleNameChange(val: string) {
+    setName(val);
+    if (!isEditing || !slug) {
+      // Auto generate slug
+      const generated = val
         .toLowerCase()
-        .trim()
-        .replace(/[^\w\s-]/g, "")
-        .replace(/[\s_-]+/g, "-")
+        .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "");
-      setSlug(autoSlug);
+      setSlug(generated);
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !slug.trim()) {
-      toast.error("Please enter a category name and slug");
+    const cleanName = name.trim();
+    if (!cleanName) {
+      toast.error("Category name is required");
       return;
     }
 
-    setSaving(true);
-    try {
-      await onSave({
-        id: category?.id,
-        name: name.trim(),
-        slug: slug.trim(),
-        sort_order: Number(sortOrder),
-        available: available,
-      });
+    const cleanSlug =
+      slug.trim() ||
+      cleanName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
 
-      onOpenChange(false);
-    } catch (err: unknown) {
-      console.error("Error saving category:", err);
-      let message = "Failed to save category";
-      if (err && typeof err === "object") {
-        const anyErr = err as { message?: string; details?: string; hint?: string };
-        message = anyErr.message || anyErr.details || message;
-      } else if (err instanceof Error) {
-        message = err.message;
-      }
-      toast.error(message);
-    } finally {
-      setSaving(false);
-    }
+    onSave({
+      id: category?.id,
+      name: cleanName,
+      slug: cleanSlug,
+      sort_order: Number(sortOrder) || 0,
+      available,
+    });
+
+    onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-[450px]">
         <DialogHeader>
-          <DialogTitle>{category ? "Edit Category" : "Add New Category"}</DialogTitle>
-          <DialogDescription>
-            Categories organize dishes on the website and swipeable menu.
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+            {isEditing ? (
+              <>
+                <Edit3 className="size-4 text-primary" />
+                Edit Category
+              </>
+            ) : (
+              <>
+                <FolderPlus className="size-4 text-primary" />
+                Add New Category
+              </>
+            )}
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            {isEditing
+              ? "Update category details and menu sorting."
+              : "Create a new food or drink section for the menu."}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label htmlFor="cat-name">Category Name</Label>
+            <Label htmlFor="cat-name" className="text-xs font-medium">
+              Category Name *
+            </Label>
             <Input
               id="cat-name"
+              placeholder="e.g., Starters, Biryani & Rice, Sizzling Grills"
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
-              placeholder="e.g. Charcoal Grills"
+              className="h-9 text-sm"
+              autoFocus
               required
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="cat-slug">URL Slug</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="cat-slug" className="text-xs font-medium">
+                URL Identifier / Slug
+              </Label>
+              <span className="text-[10px] text-muted-foreground">Used for menu navigation</span>
+            </div>
             <Input
               id="cat-slug"
+              placeholder="e.g. biryani-rice"
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
-              placeholder="e.g. grill"
-              required
+              className="h-9 text-sm font-mono text-xs"
             />
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="cat-order">Display Order</Label>
-            <Input
-              id="cat-order"
-              type="number"
-              value={sortOrder}
-              onChange={(e) => setSortOrder(Number(e.target.value))}
-              placeholder="0"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Lower numbers appear first on the menu.
-            </p>
-          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="cat-order" className="text-xs font-medium">
+                Display Order
+              </Label>
+              <Input
+                id="cat-order"
+                type="number"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(parseInt(e.target.value) || 0)}
+                className="h-9 text-sm"
+              />
+            </div>
 
-          {/* Visibility / Active Status Section */}
-          <div className="rounded-xl border border-border/80 bg-muted/40 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                  {available ? (
-                    <Eye className="size-4 text-emerald-500" />
-                  ) : (
-                    <EyeOff className="size-4 text-muted-foreground" />
-                  )}
-                  <span>Visibility Status</span>
-                </Label>
-                <p className="text-[11px] text-muted-foreground">
-                  {available
-                    ? "Active (Visible on customer menu)"
-                    : "Inactive (Hidden from customer menu, safely kept in admin)"}
-                </p>
-              </div>
-
-              <div className="inline-flex rounded-lg border border-border bg-background p-0.5 shadow-2xs">
-                <button
-                  type="button"
-                  onClick={() => setAvailable(true)}
-                  className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    available
-                      ? "bg-emerald-500 text-black shadow-xs font-semibold"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Eye className="size-3" />
-                  <span>Active</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAvailable(false)}
-                  className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    !available
-                      ? "bg-muted-foreground/30 text-foreground shadow-xs font-semibold"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <EyeOff className="size-3" />
-                  <span>Inactive</span>
-                </button>
+            <div className="space-y-1.5 flex flex-col justify-end">
+              <div className="flex items-center justify-between rounded-lg border border-border p-2.5 h-9">
+                <span className="text-xs font-medium">Visible in Menu</span>
+                <Switch checked={available} onCheckedChange={setAvailable} />
               </div>
             </div>
           </div>
 
+          <div className="rounded-lg bg-muted/50 p-3 text-[11px] text-muted-foreground flex items-start gap-2">
+            <Sparkles className="size-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <span>
+              All dishes assigned to this category will automatically appear under this section on
+              both Home and Menu pages.
+            </span>
+          </div>
+
           <DialogFooter className="pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={saving}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={saving}>
-              {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-              {category ? "Save Changes" : "Create Category"}
+            <Button type="submit" size="sm" className="gap-1.5">
+              {isEditing ? "Save Changes" : "Create Category"}
             </Button>
           </DialogFooter>
         </form>

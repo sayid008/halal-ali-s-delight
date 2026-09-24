@@ -34,10 +34,11 @@ export function saveLocalMenuSnapshot(
   categories: DatabaseCategory[],
   items: DatabaseMenuItem[],
   source: string = "admin-panel",
+  options?: { skipServerFetch?: boolean },
 ): void {
   cacheLocalMenu(categories, items);
 
-  if (typeof fetch !== "undefined") {
+  if (!options?.skipServerFetch && typeof fetch !== "undefined") {
     fetch("/api/menu", {
       method: "POST",
       headers: { "content-type": "application/json" },

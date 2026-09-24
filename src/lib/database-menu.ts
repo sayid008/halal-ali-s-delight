@@ -61,7 +61,10 @@ export async function fetchDatabaseStats(): Promise<DatabaseStats | null> {
 /**
  * Fast background sync to Supabase without blocking the UI or throwing ON CONFLICT errors
  */
-async function syncToSupabaseAsync(categories: DatabaseCategory[], items: DatabaseMenuItem[]) {
+export async function syncToSupabaseAsync(
+  categories: DatabaseCategory[],
+  items: DatabaseMenuItem[],
+) {
   if (!isSupabaseConfigured) return;
 
   try {
