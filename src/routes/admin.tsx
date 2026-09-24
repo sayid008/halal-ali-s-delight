@@ -119,9 +119,7 @@ function AdminRoute() {
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"all" | "item" | "category" | "offer" | "trash">(
-    "all",
-  );
+  const [activeTab, setActiveTab] = useState<"item" | "category" | "offer" | "trash">("item");
 
   // Auth check on mount
   useEffect(() => {
@@ -609,66 +607,94 @@ function AdminRoute() {
             )}
           </div>
 
-          {/* Column Toggle / Filter Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border/60 bg-muted/30 p-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab("all")}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                activeTab === "all"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              All Columns (4)
-            </button>
+          {/* Exactly 4 Column Selector Tabs (No "All" option) */}
+          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border/60 bg-muted/30 p-1">
             <button
               type="button"
               onClick={() => setActiveTab("item")}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
                 activeTab === "item"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-foreground shadow-xs ring-1 ring-border/50 font-semibold"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
               }`}
             >
-              <UtensilsCrossed className="size-3" />
-              Item ({filteredItems.length})
+              <UtensilsCrossed className="size-3.5 text-amber-500" />
+              <span>Item</span>
+              <Badge
+                variant="secondary"
+                className={`h-4 min-w-4 px-1 text-[10px] font-mono leading-none ${
+                  activeTab === "item" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : ""
+                }`}
+              >
+                {filteredItems.length}
+              </Badge>
             </button>
+
             <button
               type="button"
               onClick={() => setActiveTab("category")}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
                 activeTab === "category"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-foreground shadow-xs ring-1 ring-border/50 font-semibold"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
               }`}
             >
-              <FolderTree className="size-3" />
-              Category ({filteredCategories.length})
+              <FolderTree className="size-3.5 text-blue-500" />
+              <span>Category</span>
+              <Badge
+                variant="secondary"
+                className={`h-4 min-w-4 px-1 text-[10px] font-mono leading-none ${
+                  activeTab === "category" ? "bg-blue-500/15 text-blue-700 dark:text-blue-300" : ""
+                }`}
+              >
+                {filteredCategories.length}
+              </Badge>
             </button>
+
             <button
               type="button"
               onClick={() => setActiveTab("offer")}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
                 activeTab === "offer"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-foreground shadow-xs ring-1 ring-border/50 font-semibold"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
               }`}
             >
-              <Sparkles className="size-3" />
-              Offer ({filteredOffers.length})
+              <Sparkles className="size-3.5 text-purple-500" />
+              <span>Offer</span>
+              <Badge
+                variant="secondary"
+                className={`h-4 min-w-4 px-1 text-[10px] font-mono leading-none ${
+                  activeTab === "offer"
+                    ? "bg-purple-500/15 text-purple-700 dark:text-purple-300"
+                    : ""
+                }`}
+              >
+                {filteredOffers.length}
+              </Badge>
             </button>
+
             <button
               type="button"
               onClick={() => setActiveTab("trash")}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
                 activeTab === "trash"
-                  ? "bg-background text-destructive shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-destructive shadow-xs ring-1 ring-destructive/30 font-semibold"
+                  : "text-muted-foreground hover:text-destructive hover:bg-muted/50"
               }`}
             >
-              <Trash2 className="size-3" />
-              Trash ({filteredTrash.length})
+              <Trash2 className="size-3.5 text-destructive" />
+              <span>Trash</span>
+              <Badge
+                variant="secondary"
+                className={`h-4 min-w-4 px-1 text-[10px] font-mono leading-none ${
+                  activeTab === "trash"
+                    ? "bg-destructive/15 text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {filteredTrash.length}
+              </Badge>
             </button>
           </div>
         </div>
@@ -690,114 +716,122 @@ function AdminRoute() {
           </Alert>
         )}
 
-        {/* 4-Column Grid View */}
-        <div className="grid flex-1 grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
+        {/* 4 Columns View: Displaying Selected Column */}
+        <div className="flex flex-1 flex-col">
           {/* =========================================
               COLUMN 1: ITEM
              ========================================= */}
-          {(activeTab === "all" || activeTab === "item") && (
-            <div className="flex flex-col rounded-xl border border-border/70 bg-card shadow-xs">
+          {activeTab === "item" && (
+            <div className="flex flex-1 flex-col rounded-2xl border border-border/70 bg-card shadow-xs">
               {/* Column Header */}
-              <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                    <UtensilsCrossed className="size-4" />
+              <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                    <UtensilsCrossed className="size-5" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-semibold text-foreground">Item</h2>
-                    <p className="text-[10px] text-muted-foreground">Active Menu Items</p>
+                    <h2 className="text-base font-semibold text-foreground">Item</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Active menu items fetched from Supabase (
+                      <span className="font-mono">{filteredItems.length}</span> total)
+                    </p>
                   </div>
                 </div>
-                <Badge variant="secondary" className="px-2 py-0.5 text-xs font-semibold">
-                  {filteredItems.length}
+                <Badge
+                  variant="outline"
+                  className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 px-2.5 py-1 text-xs font-semibold"
+                >
+                  {filteredItems.length} {filteredItems.length === 1 ? "Item" : "Items"}
                 </Badge>
               </div>
 
               {/* Column Body */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5 max-h-[calc(100vh-250px)] min-h-[260px]">
+              <div className="flex-1 p-5">
                 {dbLoading && items.length === 0 ? (
-                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <Loader2 className="size-6 animate-spin text-primary" />
-                    <span className="text-xs">Loading items from Supabase...</span>
+                  <div className="flex h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <Loader2 className="size-7 animate-spin text-primary" />
+                    <span className="text-xs">Loading items from Supabase database...</span>
                   </div>
                 ) : filteredItems.length === 0 ? (
                   /* Blank state if Supabase doesn't contain items */
-                  <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border/60 p-6 text-center">
-                    <UtensilsCrossed className="mb-2 size-8 text-muted-foreground/40" />
-                    <p className="text-xs font-medium text-muted-foreground">
+                  <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 p-8 text-center">
+                    <UtensilsCrossed className="mb-3 size-10 text-muted-foreground/30" />
+                    <p className="text-sm font-medium text-muted-foreground">
                       {searchQuery ? "No matching items found" : "No items in database"}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground/60">
+                    <p className="mt-1 text-xs text-muted-foreground/60">
                       Supabase table is currently empty
                     </p>
                   </div>
                 ) : (
-                  filteredItems.map((item) => {
-                    const catName = item.category_id ? categoryMap.get(item.category_id) : null;
-                    return (
-                      <div
-                        key={item.id}
-                        className="group relative rounded-lg border border-border/50 bg-background/80 p-3 transition-all hover:border-primary/40 hover:shadow-xs"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                              {item.name}
-                            </h3>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                    {filteredItems.map((item) => {
+                      const catName = item.category_id ? categoryMap.get(item.category_id) : null;
+                      return (
+                        <div
+                          key={item.id}
+                          className="group relative flex flex-col justify-between rounded-xl border border-border/60 bg-background/80 p-4 transition-all hover:border-amber-500/40 hover:shadow-sm"
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+                                  {item.name}
+                                </h3>
+                                {catName && (
+                                  <Badge
+                                    variant="outline"
+                                    className="mt-1 border-border/60 text-[10px] px-1.5 py-0 font-normal text-muted-foreground"
+                                  >
+                                    {catName}
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {item.image_url && (
+                                <img
+                                  src={item.image_url}
+                                  alt={item.name}
+                                  className="size-12 shrink-0 rounded-lg object-cover border border-border/40"
+                                  loading="lazy"
+                                />
+                              )}
+                            </div>
+
                             {item.description && (
-                              <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                              <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
                                 {item.description}
                               </p>
                             )}
                           </div>
 
-                          {item.image_url && (
-                            <img
-                              src={item.image_url}
-                              alt={item.name}
-                              className="size-11 shrink-0 rounded-md object-cover border border-border/40"
-                              loading="lazy"
-                            />
-                          )}
-                        </div>
-
-                        <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-2 text-[11px]">
-                          <span className="font-semibold text-primary font-mono">
-                            {formatPrice(item.price)}
-                          </span>
-
-                          <div className="flex items-center gap-1.5">
-                            {catName && (
-                              <Badge
-                                variant="outline"
-                                className="border-border/60 text-[10px] px-1.5 py-0 font-normal text-muted-foreground"
-                              >
-                                {catName}
-                              </Badge>
-                            )}
+                          <div className="mt-4 flex items-center justify-between border-t border-border/40 pt-3 text-xs">
+                            <span className="font-bold text-primary font-mono text-sm">
+                              {formatPrice(item.price)}
+                            </span>
 
                             {item.available !== false ? (
                               <span
-                                className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400"
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
                                 title="Available"
                               >
-                                <CheckCircle2 className="size-3" />
+                                <CheckCircle2 className="size-3.5" />
                                 Active
                               </span>
                             ) : (
                               <span
-                                className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground"
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground"
                                 title="Unavailable"
                               >
-                                <XCircle className="size-3" />
+                                <XCircle className="size-3.5" />
                                 Hidden
                               </span>
                             )}
                           </div>
                         </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>
@@ -806,76 +840,90 @@ function AdminRoute() {
           {/* =========================================
               COLUMN 2: CATEGORY
              ========================================= */}
-          {(activeTab === "all" || activeTab === "category") && (
-            <div className="flex flex-col rounded-xl border border-border/70 bg-card shadow-xs">
+          {activeTab === "category" && (
+            <div className="flex flex-1 flex-col rounded-2xl border border-border/70 bg-card shadow-xs">
               {/* Column Header */}
-              <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                    <FolderTree className="size-4" />
+              <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                    <FolderTree className="size-5" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-semibold text-foreground">Category</h2>
-                    <p className="text-[10px] text-muted-foreground">Menu Categories</p>
+                    <h2 className="text-base font-semibold text-foreground">Category</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Menu categories fetched from Supabase (
+                      <span className="font-mono">{filteredCategories.length}</span> total)
+                    </p>
                   </div>
                 </div>
-                <Badge variant="secondary" className="px-2 py-0.5 text-xs font-semibold">
-                  {filteredCategories.length}
+                <Badge
+                  variant="outline"
+                  className="border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 px-2.5 py-1 text-xs font-semibold"
+                >
+                  {filteredCategories.length}{" "}
+                  {filteredCategories.length === 1 ? "Category" : "Categories"}
                 </Badge>
               </div>
 
               {/* Column Body */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5 max-h-[calc(100vh-250px)] min-h-[260px]">
+              <div className="flex-1 p-5">
                 {dbLoading && categories.length === 0 ? (
-                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <Loader2 className="size-6 animate-spin text-primary" />
-                    <span className="text-xs">Loading categories from Supabase...</span>
+                  <div className="flex h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <Loader2 className="size-7 animate-spin text-primary" />
+                    <span className="text-xs">Loading categories from Supabase database...</span>
                   </div>
                 ) : filteredCategories.length === 0 ? (
                   /* Blank state if Supabase doesn't contain categories */
-                  <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border/60 p-6 text-center">
-                    <FolderTree className="mb-2 size-8 text-muted-foreground/40" />
-                    <p className="text-xs font-medium text-muted-foreground">
+                  <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 p-8 text-center">
+                    <FolderTree className="mb-3 size-10 text-muted-foreground/30" />
+                    <p className="text-sm font-medium text-muted-foreground">
                       {searchQuery ? "No matching categories found" : "No categories in database"}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground/60">
+                    <p className="mt-1 text-xs text-muted-foreground/60">
                       Supabase table is currently empty
                     </p>
                   </div>
                 ) : (
-                  filteredCategories.map((cat) => {
-                    const itemCount = items.filter((i) => i.category_id === cat.id).length;
-                    return (
-                      <div
-                        key={cat.id}
-                        className="group relative rounded-lg border border-border/50 bg-background/80 p-3 transition-all hover:border-blue-500/40 hover:shadow-xs"
-                      >
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xs font-semibold text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                            {cat.name}
-                          </h3>
-                          <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
-                            #{cat.sort_order ?? 0}
-                          </Badge>
-                        </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                    {filteredCategories.map((cat) => {
+                      const itemCount = items.filter((i) => i.category_id === cat.id).length;
+                      return (
+                        <div
+                          key={cat.id}
+                          className="group relative flex flex-col justify-between rounded-xl border border-border/60 bg-background/80 p-4 transition-all hover:border-blue-500/40 hover:shadow-sm"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-semibold text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                                {cat.name}
+                              </h3>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] font-mono px-2 py-0.5"
+                              >
+                                #{cat.sort_order ?? 0}
+                              </Badge>
+                            </div>
 
-                        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                          <span className="font-mono text-[10px]">slug: {cat.slug}</span>
-                        </div>
+                            <div className="mt-2 text-xs font-mono text-muted-foreground">
+                              slug: <span className="text-foreground/80">{cat.slug}</span>
+                            </div>
+                          </div>
 
-                        <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-2 text-[11px]">
-                          <span className="text-muted-foreground text-[10px]">
-                            {itemCount} {itemCount === 1 ? "item" : "items"} linked
-                          </span>
+                          <div className="mt-4 flex items-center justify-between border-t border-border/40 pt-3 text-xs">
+                            <span className="text-muted-foreground">
+                              {itemCount} {itemCount === 1 ? "item" : "items"} linked
+                            </span>
 
-                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="size-3" />
-                            {cat.available !== false ? "Visible" : "Hidden"}
-                          </span>
+                            <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                              <CheckCircle2 className="size-3.5" />
+                              {cat.available !== false ? "Visible" : "Hidden"}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>
@@ -884,107 +932,118 @@ function AdminRoute() {
           {/* =========================================
               COLUMN 3: OFFER
              ========================================= */}
-          {(activeTab === "all" || activeTab === "offer") && (
-            <div className="flex flex-col rounded-xl border border-border/70 bg-card shadow-xs">
+          {activeTab === "offer" && (
+            <div className="flex flex-1 flex-col rounded-2xl border border-border/70 bg-card shadow-xs">
               {/* Column Header */}
-              <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                    <Sparkles className="size-4" />
+              <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-9 items-center justify-center rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                    <Sparkles className="size-5" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-semibold text-foreground">Offer</h2>
-                    <p className="text-[10px] text-muted-foreground">Special Deals & Combos</p>
+                    <h2 className="text-base font-semibold text-foreground">Offer</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Special deals and banner offers fetched from Supabase (
+                      <span className="font-mono">{filteredOffers.length}</span> total)
+                    </p>
                   </div>
                 </div>
-                <Badge variant="secondary" className="px-2 py-0.5 text-xs font-semibold">
-                  {filteredOffers.length}
+                <Badge
+                  variant="outline"
+                  className="border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300 px-2.5 py-1 text-xs font-semibold"
+                >
+                  {filteredOffers.length} {filteredOffers.length === 1 ? "Offer" : "Offers"}
                 </Badge>
               </div>
 
               {/* Column Body */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5 max-h-[calc(100vh-250px)] min-h-[260px]">
+              <div className="flex-1 p-5">
                 {dbLoading && offers.length === 0 ? (
-                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <Loader2 className="size-6 animate-spin text-primary" />
-                    <span className="text-xs">Loading offers from Supabase...</span>
+                  <div className="flex h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <Loader2 className="size-7 animate-spin text-primary" />
+                    <span className="text-xs">Loading offers from Supabase database...</span>
                   </div>
                 ) : filteredOffers.length === 0 ? (
                   /* Blank state if Supabase doesn't contain offers */
-                  <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border/60 p-6 text-center">
-                    <Sparkles className="mb-2 size-8 text-muted-foreground/40" />
-                    <p className="text-xs font-medium text-muted-foreground">
+                  <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 p-8 text-center">
+                    <Sparkles className="mb-3 size-10 text-muted-foreground/30" />
+                    <p className="text-sm font-medium text-muted-foreground">
                       {searchQuery ? "No matching offers found" : "No offers in database"}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground/60">
+                    <p className="mt-1 text-xs text-muted-foreground/60">
                       Supabase table is currently empty
                     </p>
                   </div>
                 ) : (
-                  filteredOffers.map((offer) => (
-                    <div
-                      key={offer.id}
-                      className="group relative rounded-lg border border-border/50 bg-background/80 p-3 transition-all hover:border-purple-500/40 hover:shadow-xs"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          {offer.badge && (
-                            <Badge
-                              variant="secondary"
-                              className="mb-1 bg-purple-500/10 text-[10px] font-semibold text-purple-600 dark:text-purple-400 px-1.5 py-0"
-                            >
-                              <Tag className="mr-1 size-2.5" />
-                              {offer.badge}
-                            </Badge>
-                          )}
-                          <h3 className="text-xs font-semibold text-foreground truncate group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
-                            {offer.title}
-                          </h3>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                    {filteredOffers.map((offer) => (
+                      <div
+                        key={offer.id}
+                        className="group relative flex flex-col justify-between rounded-xl border border-border/60 bg-background/80 p-4 transition-all hover:border-purple-500/40 hover:shadow-sm"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              {offer.badge && (
+                                <Badge
+                                  variant="secondary"
+                                  className="mb-1.5 bg-purple-500/10 text-[10px] font-semibold text-purple-600 dark:text-purple-400 px-2 py-0.5"
+                                >
+                                  <Tag className="mr-1 size-2.5" />
+                                  {offer.badge}
+                                </Badge>
+                              )}
+                              <h3 className="text-sm font-semibold text-foreground group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
+                                {offer.title}
+                              </h3>
+                            </div>
+
+                            {offer.image_url && (
+                              <img
+                                src={offer.image_url}
+                                alt={offer.title}
+                                className="size-12 shrink-0 rounded-lg object-cover border border-border/40"
+                                loading="lazy"
+                              />
+                            )}
+                          </div>
+
                           {offer.description && (
-                            <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                            <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
                               {offer.description}
                             </p>
                           )}
                         </div>
 
-                        {offer.image_url && (
-                          <img
-                            src={offer.image_url}
-                            alt={offer.title}
-                            className="size-11 shrink-0 rounded-md object-cover border border-border/40"
-                            loading="lazy"
-                          />
-                        )}
-                      </div>
+                        <div className="mt-4 flex items-center justify-between border-t border-border/40 pt-3 text-xs">
+                          <div className="flex items-baseline gap-1.5">
+                            {offer.price !== undefined && offer.price !== null && (
+                              <span className="font-bold text-primary font-mono text-sm">
+                                {formatPrice(offer.price)}
+                              </span>
+                            )}
+                            {offer.original_price && (
+                              <span className="text-xs text-muted-foreground line-through font-mono">
+                                {formatPrice(offer.original_price)}
+                              </span>
+                            )}
+                          </div>
 
-                      <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-2 text-[11px]">
-                        <div className="flex items-baseline gap-1.5">
-                          {offer.price !== undefined && offer.price !== null && (
-                            <span className="font-semibold text-primary font-mono">
-                              {formatPrice(offer.price)}
+                          <div className="flex items-center gap-2">
+                            {offer.slides && offer.slides.length > 0 && (
+                              <span className="text-[11px] text-muted-foreground font-mono">
+                                {offer.slides.length} slides
+                              </span>
+                            )}
+                            <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                              <CheckCircle2 className="size-3.5" />
+                              {offer.available !== false ? "Active" : "Disabled"}
                             </span>
-                          )}
-                          {offer.original_price && (
-                            <span className="text-[10px] text-muted-foreground line-through font-mono">
-                              {formatPrice(offer.original_price)}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          {offer.slides && offer.slides.length > 0 && (
-                            <span className="text-[10px] text-muted-foreground">
-                              {offer.slides.length} {offer.slides.length === 1 ? "slide" : "slides"}
-                            </span>
-                          )}
-                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="size-3" />
-                            {offer.available !== false ? "Active" : "Disabled"}
-                          </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -993,57 +1052,60 @@ function AdminRoute() {
           {/* =========================================
               COLUMN 4: TRASH
              ========================================= */}
-          {(activeTab === "all" || activeTab === "trash") && (
-            <div className="flex flex-col rounded-xl border border-destructive/30 bg-card shadow-xs">
+          {activeTab === "trash" && (
+            <div className="flex flex-1 flex-col rounded-2xl border border-destructive/30 bg-card shadow-xs">
               {/* Column Header */}
-              <div className="flex items-center justify-between border-b border-border/60 bg-destructive/5 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center rounded-md bg-destructive/10 text-destructive">
-                    <Trash2 className="size-4" />
+              <div className="flex items-center justify-between border-b border-border/60 bg-destructive/5 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-9 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                    <Trash2 className="size-5" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-semibold text-foreground">Trash</h2>
-                    <p className="text-[10px] text-muted-foreground">Deleted Records</p>
+                    <h2 className="text-base font-semibold text-foreground">Trash</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Soft-deleted records across all tables (
+                      <span className="font-mono">{filteredTrash.length}</span> total)
+                    </p>
                   </div>
                 </div>
                 <Badge
                   variant="outline"
-                  className="border-destructive/30 bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-semibold"
+                  className="border-destructive/30 bg-destructive/10 text-destructive px-2.5 py-1 text-xs font-semibold"
                 >
-                  {filteredTrash.length}
+                  {filteredTrash.length} Trashed
                 </Badge>
               </div>
 
               {/* Column Body */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5 max-h-[calc(100vh-250px)] min-h-[260px]">
+              <div className="flex-1 p-5">
                 {dbLoading && trashList.length === 0 ? (
-                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <Loader2 className="size-6 animate-spin text-destructive" />
-                    <span className="text-xs">Checking trash records...</span>
+                  <div className="flex h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <Loader2 className="size-7 animate-spin text-destructive" />
+                    <span className="text-xs">Checking trash records in database...</span>
                   </div>
                 ) : filteredTrash.length === 0 ? (
                   /* Blank state if Supabase doesn't contain trash records */
-                  <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border/60 p-6 text-center">
-                    <Trash2 className="mb-2 size-8 text-muted-foreground/40" />
-                    <p className="text-xs font-medium text-muted-foreground">
+                  <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 p-8 text-center">
+                    <Trash2 className="mb-3 size-10 text-muted-foreground/30" />
+                    <p className="text-sm font-medium text-muted-foreground">
                       {searchQuery ? "No matching trashed records" : "Trash is empty"}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground/60">
+                    <p className="mt-1 text-xs text-muted-foreground/60">
                       No deleted records in database
                     </p>
                   </div>
                 ) : (
-                  filteredTrash.map((trash) => (
-                    <div
-                      key={trash.id}
-                      className="group relative rounded-lg border border-destructive/20 bg-background/80 p-3 transition-all hover:border-destructive/40 hover:shadow-xs"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                    {filteredTrash.map((trash) => (
+                      <div
+                        key={trash.id}
+                        className="group relative flex flex-col justify-between rounded-xl border border-destructive/20 bg-background/80 p-4 transition-all hover:border-destructive/40 hover:shadow-sm"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
                             <Badge
                               variant="outline"
-                              className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0 ${
+                              className={`text-[9px] uppercase tracking-wider font-semibold px-2 py-0.5 ${
                                 trash.type === "item"
                                   ? "border-amber-500/30 text-amber-600 dark:text-amber-400"
                                   : trash.type === "category"
@@ -1053,36 +1115,35 @@ function AdminRoute() {
                             >
                               {trash.type}
                             </Badge>
+
+                            <span className="text-destructive font-medium text-xs">Trashed</span>
                           </div>
 
-                          <h3 className="mt-1 text-xs font-semibold text-foreground line-through opacity-80 truncate">
+                          <h3 className="mt-2 text-sm font-semibold text-foreground line-through opacity-80">
                             {trash.title}
                           </h3>
 
                           {trash.subtitle && (
-                            <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
-                              {trash.subtitle}
-                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">{trash.subtitle}</p>
                           )}
                         </div>
-                      </div>
 
-                      <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
-                        <span className="flex items-center gap-1 font-mono">
-                          <Clock className="size-2.5" />
-                          {trash.deleted_at
-                            ? new Date(trash.deleted_at).toLocaleDateString("en-GB", {
-                                day: "numeric",
-                                month: "short",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })
-                            : "Deleted"}
-                        </span>
-                        <span className="text-destructive font-medium text-[10px]">Trashed</span>
+                        <div className="mt-4 flex items-center justify-between border-t border-border/40 pt-3 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1 font-mono text-[11px]">
+                            <Clock className="size-3" />
+                            {trash.deleted_at
+                              ? new Date(trash.deleted_at).toLocaleDateString("en-GB", {
+                                  day: "numeric",
+                                  month: "short",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "Deleted"}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
