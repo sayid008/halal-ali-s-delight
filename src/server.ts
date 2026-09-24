@@ -8,7 +8,6 @@ import { renderErrorPage } from "./lib/error-page";
 const DB_DIR = path.resolve(process.cwd(), "data");
 const DB_FILE = path.resolve(DB_DIR, "menu-db.json");
 const OFFER_FILE = path.resolve(DB_DIR, "special-offer-db.json");
-const HOURS_FILE = path.resolve(DB_DIR, "opening-hours-db.json");
 
 const SEED_CATEGORIES = [
   {
@@ -432,123 +431,6 @@ function writeOfferDb(offer: unknown) {
   }
 }
 
-const DEFAULT_SCHEDULE = [
-  {
-    day: "Monday",
-    shortDay: "Mon",
-    dayIndex: 1,
-    openTime: "12:00 PM",
-    closeTime: "11:00 PM",
-    openHour: 12,
-    openMinute: 0,
-    closeHour: 23,
-    closeMinute: 0,
-    isOpen: true,
-  },
-  {
-    day: "Tuesday",
-    shortDay: "Tue",
-    dayIndex: 2,
-    openTime: "12:00 PM",
-    closeTime: "11:00 PM",
-    openHour: 12,
-    openMinute: 0,
-    closeHour: 23,
-    closeMinute: 0,
-    isOpen: true,
-  },
-  {
-    day: "Wednesday",
-    shortDay: "Wed",
-    dayIndex: 3,
-    openTime: "12:00 PM",
-    closeTime: "11:00 PM",
-    openHour: 12,
-    openMinute: 0,
-    closeHour: 23,
-    closeMinute: 0,
-    isOpen: true,
-  },
-  {
-    day: "Thursday",
-    shortDay: "Thu",
-    dayIndex: 4,
-    openTime: "12:00 PM",
-    closeTime: "11:00 PM",
-    openHour: 12,
-    openMinute: 0,
-    closeHour: 23,
-    closeMinute: 0,
-    isOpen: true,
-  },
-  {
-    day: "Friday",
-    shortDay: "Fri",
-    dayIndex: 5,
-    openTime: "12:00 PM",
-    closeTime: "11:00 PM",
-    openHour: 12,
-    openMinute: 0,
-    closeHour: 23,
-    closeMinute: 0,
-    isOpen: true,
-  },
-  {
-    day: "Saturday",
-    shortDay: "Sat",
-    dayIndex: 6,
-    openTime: "12:00 PM",
-    closeTime: "11:00 PM",
-    openHour: 12,
-    openMinute: 0,
-    closeHour: 23,
-    closeMinute: 0,
-    isOpen: true,
-  },
-  {
-    day: "Sunday",
-    shortDay: "Sun",
-    dayIndex: 0,
-    openTime: "12:00 PM",
-    closeTime: "11:00 PM",
-    openHour: 12,
-    openMinute: 0,
-    closeHour: 23,
-    closeMinute: 0,
-    isOpen: true,
-  },
-];
-
-function readHoursDb() {
-  try {
-    ensureDbFile();
-    if (fs.existsSync(HOURS_FILE)) {
-      const data = fs.readFileSync(HOURS_FILE, "utf-8");
-      return JSON.parse(data);
-    }
-  } catch (e) {
-    console.error("Failed to read opening-hours-db.json:", e);
-  }
-
-  const defaultHours = {
-    schedule: DEFAULT_SCHEDULE,
-    emergencyClose: false,
-    announcement: "Authentic Charcoal Grill • 100% Halal Certified • Fresh Daily",
-    updated_at: new Date().toISOString(),
-  };
-  writeHoursDb(defaultHours);
-  return defaultHours;
-}
-
-function writeHoursDb(hoursData: unknown) {
-  try {
-    ensureDbFile();
-    fs.writeFileSync(HOURS_FILE, JSON.stringify(hoursData, null, 2), "utf-8");
-  } catch (err) {
-    console.error("Failed to write opening-hours-db.json:", err);
-  }
-}
-
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
@@ -619,11 +501,9 @@ export default {
           );
         }
 
-        // POST /api/menu/store-all, POST /api/menu/batch, or POST /api/menu/seed
+        // POST /api/menu/store-all or POST /api/menu/seed
         if (
-          (url.pathname === "/api/menu/store-all" ||
-            url.pathname === "/api/menu/batch" ||
-            url.pathname === "/api/menu/seed") &&
+          (url.pathname === "/api/menu/store-all" || url.pathname === "/api/menu/seed") &&
           request.method === "POST"
         ) {
           try {
@@ -672,11 +552,8 @@ export default {
           }
         }
 
-        // POST /api/menu/reset or POST /api/menu/reset-defaults
-        if (
-          (url.pathname === "/api/menu/reset" || url.pathname === "/api/menu/reset-defaults") &&
-          request.method === "POST"
-        ) {
+        // POST /api/menu/reset
+        if (url.pathname === "/api/menu/reset" && request.method === "POST") {
           const written = writeDb(SEED_CATEGORIES, SEED_ITEMS);
           return new Response(
             JSON.stringify({
@@ -758,14 +635,14 @@ export default {
         }
       }
 
-      if (url.pathname === "/api/special-offer" || url.pathname === "/api/special-offers") {
+      if (url.pathname === "/api/special-offer") {
         if (request.method === "OPTIONS") {
           return new Response(null, { status: 204, headers: CORS_HEADERS });
         }
 
         if (request.method === "GET") {
           const offer = readOfferDb();
-          return new Response(JSON.stringify({ offer, ...offer }), {
+          return new Response(JSON.stringify({ offer }), {
             status: 200,
             headers: {
               "content-type": "application/json",
@@ -780,41 +657,6 @@ export default {
             const offer = await request.json();
             writeOfferDb(offer);
             return new Response(JSON.stringify({ success: true, offer }), {
-              status: 200,
-              headers: { "content-type": "application/json", ...CORS_HEADERS },
-            });
-          } catch (err: unknown) {
-            const errMsg = err instanceof Error ? err.message : "Invalid payload";
-            return new Response(JSON.stringify({ error: errMsg }), {
-              status: 400,
-              headers: { "content-type": "application/json", ...CORS_HEADERS },
-            });
-          }
-        }
-      }
-
-      if (url.pathname === "/api/opening-hours") {
-        if (request.method === "OPTIONS") {
-          return new Response(null, { status: 204, headers: CORS_HEADERS });
-        }
-
-        if (request.method === "GET") {
-          const hours = readHoursDb();
-          return new Response(JSON.stringify(hours), {
-            status: 200,
-            headers: {
-              "content-type": "application/json",
-              "cache-control": "no-cache, no-store, must-revalidate",
-              ...CORS_HEADERS,
-            },
-          });
-        }
-
-        if (request.method === "POST" || request.method === "PUT") {
-          try {
-            const hoursData = await request.json();
-            writeHoursDb(hoursData);
-            return new Response(JSON.stringify({ success: true, ...hoursData }), {
               status: 200,
               headers: { "content-type": "application/json", ...CORS_HEADERS },
             });
