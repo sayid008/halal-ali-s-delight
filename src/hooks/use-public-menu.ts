@@ -288,7 +288,12 @@ export function usePublicMenu() {
       }
     }
 
+    const pollInterval = setInterval(() => {
+      fetchMenu();
+    }, 4000);
+
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener(MENU_ORDER_EVENT, handleUpdate as EventListener);
       window.removeEventListener("storage", handleUpdate as EventListener);
       if (typeof document !== "undefined") {

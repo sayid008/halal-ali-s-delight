@@ -4,7 +4,6 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { restaurant } from "@/data/menu";
 import { usePublicMenu } from "@/hooks/use-public-menu";
-import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 import { Loader2 } from "lucide-react";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
@@ -70,9 +69,6 @@ function Index() {
               </Link>
             </div>
           </div>
-
-          {/* Database Special Offer Banner (renders only if active in database) */}
-          <SpecialOfferHeroBanner />
         </section>
 
         {loading && sections.length === 0 ? (

@@ -331,8 +331,21 @@ export function useSpecialOffer() {
       }
     }
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchSpecialOffer().then((data) => {
+          if (mounted && data) {
+            setOffer(data);
+          }
+        });
+      }
+    };
+
     window.addEventListener("special-offer-updated", handleUpdate);
     window.addEventListener("storage", handleStorage);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
 
     let bc: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
@@ -348,10 +361,22 @@ export function useSpecialOffer() {
       }
     }
 
+    const pollInterval = setInterval(() => {
+      fetchSpecialOffer().then((data) => {
+        if (mounted && data) {
+          setOffer(data);
+        }
+      });
+    }, 4000);
+
     return () => {
       mounted = false;
+      clearInterval(pollInterval);
       window.removeEventListener("special-offer-updated", handleUpdate);
       window.removeEventListener("storage", handleStorage);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
       if (bc) {
         bc.close();
       }
