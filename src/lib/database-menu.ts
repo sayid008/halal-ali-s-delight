@@ -128,6 +128,29 @@ async function syncToSupabaseAsync(categories: DatabaseCategory[], items: Databa
     const itemInserts: Array<Record<string, unknown>> = [];
     const itemUpdates: Array<Promise<unknown>> = [];
 
+    const defaultDishCategoryMap: Record<string, string> = {
+      "vegetable samosas": "starters",
+      "chicken pakora": "starters",
+      "onion bhaji": "starters",
+      "lamb seekh kebab": "grill",
+      "chicken tikka skewers": "grill",
+      "mixed grill platter": "grill",
+      "classic butter chicken": "curries",
+      "chicken tikka masala": "curries",
+      "lamb karahi": "curries",
+      "daal tarka": "curries",
+      "royal lamb biryani": "biryani",
+      "chicken biryani": "biryani",
+      "pilau rice": "biryani",
+      "peshwari naan": "breads",
+      "garlic naan": "breads",
+      "mint raita": "breads",
+      "gulab jamun": "desserts",
+      kheer: "desserts",
+      "mango lassi": "desserts",
+      "masala chai": "desserts",
+    };
+
     for (const item of items) {
       const matchingCat = categories.find((c) => c.id === item.category_id);
       let catUuid: string | null = null;
@@ -137,6 +160,13 @@ async function syncToSupabaseAsync(categories: DatabaseCategory[], items: Databa
         catUuid = finalCatMap.get(item.category_id) || null;
       } else if (isUUID(item.category_id)) {
         catUuid = item.category_id;
+      }
+
+      if (!catUuid) {
+        const fallbackSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
+        if (fallbackSlug && finalCatMap.has(fallbackSlug)) {
+          catUuid = finalCatMap.get(fallbackSlug) || null;
+        }
       }
 
       const payload = {

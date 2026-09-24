@@ -514,10 +514,19 @@ export default {
               body = {};
             }
 
-            const categories = Array.isArray(body.categories)
-              ? (body.categories as DbCategory[])
-              : SEED_CATEGORIES;
-            const items = Array.isArray(body.items) ? (body.items as DbMenuItem[]) : SEED_ITEMS;
+            const currentDb = readDb();
+            const categories =
+              Array.isArray(body.categories) && body.categories.length > 0
+                ? (body.categories as DbCategory[])
+                : currentDb.categories && currentDb.categories.length > 0
+                  ? currentDb.categories
+                  : SEED_CATEGORIES;
+            const items =
+              Array.isArray(body.items) && body.items.length > 0
+                ? (body.items as DbMenuItem[])
+                : currentDb.items && currentDb.items.length > 0
+                  ? currentDb.items
+                  : SEED_ITEMS;
 
             const written = writeDb(categories, items);
             return new Response(
@@ -588,8 +597,19 @@ export default {
           if (request.method === "POST" || request.method === "PUT") {
             try {
               const body = (await request.json()) as { categories?: unknown[]; items?: unknown[] };
-              const categories = body.categories || [];
-              const items = body.items || [];
+              const currentDb = readDb();
+              const categories =
+                Array.isArray(body.categories) && body.categories.length > 0
+                  ? body.categories
+                  : currentDb.categories && currentDb.categories.length > 0
+                    ? currentDb.categories
+                    : SEED_CATEGORIES;
+              const items =
+                Array.isArray(body.items) && body.items.length > 0
+                  ? body.items
+                  : currentDb.items && currentDb.items.length > 0
+                    ? currentDb.items
+                    : SEED_ITEMS;
               const written = writeDb(categories, items);
               return new Response(
                 JSON.stringify({

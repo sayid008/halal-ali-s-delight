@@ -40,16 +40,51 @@ function buildSectionsFromData(
     });
   });
 
+  const defaultDishCategoryMap: Record<string, string> = {
+    "vegetable samosas": "starters",
+    "chicken pakora": "starters",
+    "onion bhaji": "starters",
+    "lamb seekh kebab": "grill",
+    "chicken tikka skewers": "grill",
+    "mixed grill platter": "grill",
+    "classic butter chicken": "curries",
+    "chicken tikka masala": "curries",
+    "lamb karahi": "curries",
+    "daal tarka": "curries",
+    "royal lamb biryani": "biryani",
+    "chicken biryani": "biryani",
+    "pilau rice": "biryani",
+    "peshwari naan": "breads",
+    "garlic naan": "breads",
+    "mint raita": "breads",
+    "gulab jamun": "desserts",
+    kheer: "desserts",
+    "mango lassi": "desserts",
+    "masala chai": "desserts",
+  };
+
   // Step 1: Match items with explicit category assignments
   items.forEach((item) => {
-    const matchedCat = sortedCategories.find(
+    let matchedCat = sortedCategories.find(
       (c) =>
-        item.category_id === c.id ||
-        item.category_id === c.slug ||
-        (c.slug && item.category_id === `cat-${c.slug}`) ||
-        (c.slug && item.category_id?.includes(c.slug)) ||
-        (c.name && item.category_id?.toLowerCase() === c.name.toLowerCase()),
+        Boolean(item.category_id) &&
+        (item.category_id === c.id ||
+          item.category_id === c.slug ||
+          (c.slug && item.category_id === `cat-${c.slug}`) ||
+          (c.slug && item.category_id?.includes(c.slug)) ||
+          (c.name && item.category_id?.toLowerCase() === c.name.toLowerCase())),
     );
+
+    if (!matchedCat && defaultDishCategoryMap[item.name.toLowerCase().trim()]) {
+      const targetSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
+      matchedCat = sortedCategories.find(
+        (c) =>
+          c.slug === targetSlug ||
+          c.id === targetSlug ||
+          c.id === `cat-${targetSlug}` ||
+          c.name.toLowerCase().includes(targetSlug),
+      );
+    }
 
     if (matchedCat) {
       matchedItemIds.add(item.id);
@@ -113,6 +148,7 @@ export function usePublicMenu() {
     // 1. Fetch from server API database (/data/menu-db.json) which is fast & persistent
     try {
       const res = await fetch("/api/menu", {
+        cache: "no-store",
         headers: { "cache-control": "no-cache" },
       });
       if (res.ok) {

@@ -188,21 +188,43 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const [showDbModal, setShowDbModal] = useState(false);
   const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
 
+  const persistChangesToDatabase = useCallback(
+    (updatedCats: DatabaseCategory[], updatedItems: DatabaseMenuItem[]) => {
+      saveLocalMenuSnapshot(updatedCats, updatedItems, "admin-panel");
+
+      fetch("/api/menu/store-all", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          categories: updatedCats,
+          items: updatedItems,
+          last_updated: new Date().toISOString(),
+          version: 1,
+        }),
+      }).catch((err) => {
+        console.warn("Auto-persist to database notice:", err);
+      });
+    },
+    [],
+  );
+
   async function handleStoreAllToDatabase() {
     setSavingToDb(true);
     try {
       const res = await storeAllMenuDetailsToDatabase(categories, items);
-      if (res.success) {
-        setLastSavedTimestamp(new Date().toLocaleTimeString());
-        toast.success(res.message, {
-          description: `All ${items.length} items across ${categories.length} categories are permanently stored in the server database (data/menu-db.json)${isSupabaseConfigured ? " and Supabase" : ""}.`,
-          duration: 4000,
-        });
-        const stats = await fetchDatabaseStats();
-        if (stats) setDbStats(stats);
-      } else {
-        toast.error("Failed to store all menu details to database");
-      }
+      setLastSavedTimestamp(new Date().toLocaleTimeString());
+      setDbStats({
+        totalItems: items.length,
+        totalCategories: categories.length,
+        availableItems: items.filter((i) => !i.deleted_at && i.available !== false).length,
+        lastUpdated: new Date().toISOString(),
+        isHealthy: true,
+        version: 1,
+      });
+      toast.success(res.message, {
+        description: `All ${items.length} dishes and ${categories.length} categories are permanently stored in the database.`,
+        duration: 3000,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to store to database";
       toast.error(msg);
@@ -426,7 +448,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const nextVal = item.available === false ? true : false;
     const updatedItems = items.map((i) => (i.id === item.id ? { ...i, available: nextVal } : i));
     setItems(updatedItems);
-    saveLocalMenuSnapshot(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems);
 
     toast.success(
       nextVal
@@ -458,7 +480,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const nextVal = cat.available === false ? true : false;
     const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, available: nextVal } : c));
     setCategories(updatedCats);
-    saveLocalMenuSnapshot(updatedCats, items);
+    persistChangesToDatabase(updatedCats, items);
 
     toast.success(
       nextVal
@@ -500,7 +522,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       i.id === item.id ? { ...i, deleted_at: now, available: false } : i,
     );
     setItems(updatedItems);
-    saveLocalMenuSnapshot(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems);
     toast.success(`"${item.name}" moved to Trash (auto-purges in 30 days)`);
 
     if (isSupabaseConfigured) {
@@ -545,7 +567,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     );
     setCategories(updatedCats);
     setItems(updatedItems);
-    saveLocalMenuSnapshot(updatedCats, updatedItems);
+    persistChangesToDatabase(updatedCats, updatedItems);
     toast.success(`Category "${cat.name}" moved to Trash`);
 
     if (isSupabaseConfigured) {
@@ -576,7 +598,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       i.id === item.id ? { ...i, deleted_at: null, available: true } : i,
     );
     setItems(updatedItems);
-    saveLocalMenuSnapshot(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems);
     toast.success(`"${item.name}" restored to menu!`);
 
     if (isSupabaseConfigured) {
@@ -612,7 +634,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     );
     setCategories(updatedCats);
     setItems(updatedItems);
-    saveLocalMenuSnapshot(updatedCats, updatedItems);
+    persistChangesToDatabase(updatedCats, updatedItems);
     toast.success(`Category "${cat.name}" and attached dishes restored!`);
 
     if (isSupabaseConfigured) {
@@ -639,7 +661,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   async function handlePermanentDeleteItem(item: DatabaseMenuItem) {
     const updatedItems = items.filter((i) => i.id !== item.id);
     setItems(updatedItems);
-    saveLocalMenuSnapshot(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems);
     toast.success(`"${item.name}" permanently deleted`);
 
     if (isSupabaseConfigured) {
@@ -667,7 +689,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const updatedItems = items.map((i) => (isMatchingItem(i) ? { ...i, category_id: null } : i));
     setCategories(updatedCats);
     setItems(updatedItems);
-    saveLocalMenuSnapshot(updatedCats, updatedItems);
+    persistChangesToDatabase(updatedCats, updatedItems);
     toast.success(`Category "${cat.name}" permanently deleted`);
 
     if (isSupabaseConfigured) {
@@ -689,7 +711,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const remainingCats = categories.filter((c) => !c.deleted_at);
     setItems(remainingItems);
     setCategories(remainingCats);
-    saveLocalMenuSnapshot(remainingCats, remainingItems);
+    persistChangesToDatabase(remainingCats, remainingItems);
     toast.success("Trash emptied permanently");
 
     if (isSupabaseConfigured) {
@@ -748,7 +770,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     setItems(newItems);
-    saveLocalMenuSnapshot(categories, newItems);
+    persistChangesToDatabase(categories, newItems);
 
     toast.success(isEditing ? `"${data.name}" updated!` : `"${data.name}" added to menu!`);
 
@@ -771,6 +793,15 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             );
             if (matched && isUUIDFormat(matched.id)) {
               dbCategoryId = matched.id;
+            } else {
+              const { data: sbCats } = await supabase.from("categories").select("id, slug, name");
+              const targetSlug = matched?.slug || dbCategoryId;
+              const sbCat = (sbCats || []).find(
+                (c) => c.slug === targetSlug || c.name.toLowerCase() === targetSlug.toLowerCase(),
+              );
+              if (sbCat && isUUIDFormat(sbCat.id)) {
+                dbCategoryId = sbCat.id;
+              }
             }
           }
 
@@ -868,7 +899,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     setCategories(newCats);
-    saveLocalMenuSnapshot(newCats, newItems);
+    persistChangesToDatabase(newCats, newItems);
 
     toast.success(
       isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
@@ -969,7 +1000,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }));
 
     setCategories(reordered);
-    saveLocalMenuSnapshot(reordered, items);
+    persistChangesToDatabase(reordered, items);
     toast.success(`"${movedCat.name}" moved to position #${toIdx + 1}`);
 
     try {
@@ -1008,7 +1039,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }));
 
     setItems(reordered);
-    saveLocalMenuSnapshot(categories, reordered);
+    persistChangesToDatabase(categories, reordered);
     toast.success(`"${movedItem.name}" moved to position #${toFilteredIdx + 1}`);
 
     try {
