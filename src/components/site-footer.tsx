@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "@tanstack/react-router";
 import { restaurant } from "@/data/menu";
 import { getRestaurantStatus } from "@/lib/opening-hours";
 
@@ -61,6 +62,9 @@ export function SiteFooter() {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs opacity-60">
           <p>100% halal certified. Dine in or take away, seven days a week.</p>
+          <Link to="/admin" className="hover:text-gold hover:underline transition-colors">
+            Staff / Admin Portal →
+          </Link>
         </div>
       </div>
     </footer>

@@ -160,3 +160,74 @@ export const DEFAULT_RESTAURANT_STATUS: RestaurantStatus = {
   todaySchedule: WEEKLY_SCHEDULE[0],
   currentDayIndex: 1,
 };
+
+const SCHEDULE_STORAGE_KEY = "halal_ali_opening_schedule";
+const EMERGENCY_STORAGE_KEY = "halal_ali_emergency_close";
+const ANNOUNCEMENT_STORAGE_KEY = "halal_ali_announcement";
+
+export function getOpeningScheduleFromStorage(): DaySchedule[] {
+  if (typeof window === "undefined" || !window.localStorage) return WEEKLY_SCHEDULE;
+  try {
+    const raw = window.localStorage.getItem(SCHEDULE_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length === 7) return parsed;
+    }
+  } catch (e) {
+    console.warn("Could not parse schedule from localStorage:", e);
+  }
+  return WEEKLY_SCHEDULE;
+}
+
+export function saveOpeningScheduleToStorage(schedule: DaySchedule[]): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(schedule));
+    window.dispatchEvent(new CustomEvent("opening-hours-updated"));
+  } catch (e) {
+    console.warn("Could not save schedule to localStorage:", e);
+  }
+}
+
+export function getEmergencyOverrideFromStorage(): boolean {
+  if (typeof window === "undefined" || !window.localStorage) return false;
+  try {
+    return window.localStorage.getItem(EMERGENCY_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function saveEmergencyOverrideToStorage(override: boolean): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(EMERGENCY_STORAGE_KEY, String(override));
+    window.dispatchEvent(new CustomEvent("opening-hours-updated"));
+  } catch {
+    // ignore
+  }
+}
+
+export function getSpecialAnnouncementFromStorage(): string {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return "Authentic Charcoal Grill • 100% Halal Certified • Fresh Daily";
+  }
+  try {
+    return (
+      window.localStorage.getItem(ANNOUNCEMENT_STORAGE_KEY) ||
+      "Authentic Charcoal Grill • 100% Halal Certified • Fresh Daily"
+    );
+  } catch {
+    return "Authentic Charcoal Grill • 100% Halal Certified • Fresh Daily";
+  }
+}
+
+export function saveSpecialAnnouncementToStorage(text: string): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(ANNOUNCEMENT_STORAGE_KEY, text);
+    window.dispatchEvent(new CustomEvent("opening-hours-updated"));
+  } catch {
+    // ignore
+  }
+}
