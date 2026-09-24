@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
+  supabase,
+  isSupabaseConfigured,
   formatPrice,
   type DatabaseMenuItem,
   type DatabaseCategory,
@@ -162,6 +164,28 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     let mounted = true;
 
     async function loadData() {
+      if (isSupabaseConfigured) {
+        try {
+          const [catRes, itemRes] = await Promise.all([
+            supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+            supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+          ]);
+          if (mounted) {
+            if (catRes.data && Array.isArray(catRes.data) && catRes.data.length > 0) {
+              setCategories(catRes.data as DatabaseCategory[]);
+            }
+            if (itemRes.data && Array.isArray(itemRes.data) && itemRes.data.length > 0) {
+              setItems(itemRes.data as DatabaseMenuItem[]);
+            }
+            if (catRes.data && catRes.data.length > 0) {
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn("Could not fetch database menu from Supabase:", err);
+        }
+      }
+
       try {
         const res = await fetch("/api/menu");
         if (res.ok) {

@@ -19,7 +19,6 @@ import {
   Loader2,
   Save,
   Check,
-  RotateCcw,
   Eye,
   EyeOff,
   ImageIcon,
@@ -232,12 +231,6 @@ export function SpecialOfferManager() {
     }, 300);
   }
 
-  function handleResetDefault() {
-    applyAndSaveOffer(DEFAULT_SPECIAL_OFFER);
-    setActiveSlideIdx(0);
-    toast.info("Reset to default special offers and saved!");
-  }
-
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center rounded-2xl border border-border bg-card">
@@ -279,17 +272,6 @@ export function SpecialOfferManager() {
                 <span>Show</span>
               </>
             )}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleResetDefault}
-            className="h-8 sm:h-9 px-2.5 sm:px-3 gap-1 text-xs text-muted-foreground hover:text-foreground shrink-0"
-            title="Reset to Default Offers"
-          >
-            <RotateCcw className="size-3.5" />
-            <span className="hidden xs:inline">Reset</span>
           </Button>
 
           <Button

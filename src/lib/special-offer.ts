@@ -135,27 +135,7 @@ export function getLocalSpecialOffer(): SpecialOffer {
 export async function fetchSpecialOffer(): Promise<SpecialOffer> {
   const local = getLocalSpecialOffer();
 
-  // 1. Fetch from server API database (/data/special-offer-db.json)
-  try {
-    const res = await fetch("/api/special-offer");
-    if (res.ok) {
-      const data = (await res.json()) as { offer?: SpecialOffer };
-      if (data.offer) {
-        if (isStorageAvailable()) {
-          try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data.offer));
-          } catch {
-            // ignore
-          }
-        }
-        return data.offer;
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  // 2. Fetch from Supabase if configured
+  // 1. Fetch from Supabase first if configured
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -194,6 +174,26 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
     } catch (err) {
       console.warn("Could not fetch remote special offer from Supabase:", err);
     }
+  }
+
+  // 2. Fetch from server API database
+  try {
+    const res = await fetch("/api/special-offer");
+    if (res.ok) {
+      const data = (await res.json()) as { offer?: SpecialOffer };
+      if (data.offer) {
+        if (isStorageAvailable()) {
+          try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data.offer));
+          } catch {
+            // ignore
+          }
+        }
+        return data.offer;
+      }
+    }
+  } catch {
+    // ignore
   }
 
   return local;

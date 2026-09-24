@@ -145,7 +145,30 @@ export function usePublicMenu() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {
-    // 1. Fetch from server API database (/data/menu-db.json) which is fast & persistent
+    // 1. Primary: Fetch from live Supabase database if configured
+    if (isSupabaseConfigured) {
+      try {
+        const [catRes, itemRes] = await Promise.all([
+          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+          supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+        ]);
+
+        const dbCategories = (catRes.data as DatabaseCategory[]) || [];
+        const dbItems = (itemRes.data as DatabaseMenuItem[]) || [];
+
+        if (dbCategories.length > 0 || dbItems.length > 0) {
+          const grouped = buildSectionsFromData(dbCategories, dbItems);
+          setSections(grouped);
+          cacheLocalMenu(dbCategories, dbItems);
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.warn("Error fetching menu from Supabase:", err);
+      }
+    }
+
+    // 2. Fetch from server API database
     try {
       const res = await fetch("/api/menu", {
         cache: "no-store",
@@ -166,29 +189,6 @@ export function usePublicMenu() {
       }
     } catch {
       // ignore network error, fall through to alternatives
-    }
-
-    // 2. Try fetching from live Supabase database if /api/menu was unavailable
-    if (isSupabaseConfigured) {
-      try {
-        const [catRes, itemRes] = await Promise.all([
-          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-          supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
-        ]);
-
-        const dbCategories = (catRes.data as DatabaseCategory[]) || [];
-        const dbItems = (itemRes.data as DatabaseMenuItem[]) || [];
-
-        if (dbCategories.length > 0) {
-          const grouped = buildSectionsFromData(dbCategories, dbItems);
-          setSections(grouped);
-          cacheLocalMenu(dbCategories, dbItems);
-          setLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.warn("Error fetching menu from Supabase:", err);
-      }
     }
 
     // 3. Fallback to cached local snapshot of database
