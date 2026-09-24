@@ -110,7 +110,29 @@ export function usePublicMenu() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {
-    // 1. Try fetching from live Supabase database first
+    // 1. Fetch from server API database (/data/menu-db.json) which is fast & persistent
+    try {
+      const res = await fetch("/api/menu", {
+        headers: { "cache-control": "no-cache" },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+          const grouped = buildSectionsFromData(data.categories, data.items || []);
+          setSections(grouped);
+          cacheLocalMenu(data.categories, data.items || []);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // ignore network error, fall through to alternatives
+    }
+
+    // 2. Try fetching from live Supabase database if /api/menu was unavailable
     if (isSupabaseConfigured) {
       try {
         const [catRes, itemRes] = await Promise.all([
@@ -133,26 +155,6 @@ export function usePublicMenu() {
       }
     }
 
-    // 2. Try fetching from server API database (/data/menu-db.json)
-    try {
-      const res = await fetch("/api/menu");
-      if (res.ok) {
-        const data = (await res.json()) as {
-          categories?: DatabaseCategory[];
-          items?: DatabaseMenuItem[];
-        };
-        if (data.categories && data.categories.length > 0) {
-          const grouped = buildSectionsFromData(data.categories, data.items || []);
-          setSections(grouped);
-          cacheLocalMenu(data.categories, data.items || []);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {
-      // ignore network error
-    }
-
     // 3. Fallback to cached local snapshot of database
     const localSnapshot = getLocalMenuSnapshot();
     if (
@@ -166,13 +168,13 @@ export function usePublicMenu() {
       return;
     }
 
-    // If database is completely empty, strictly return empty (no static fallback)
+    // If database is completely empty, strictly return empty
     setSections([]);
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    // 1. Immediately hydrate from local database snapshot on mount (client-side only, post-hydration)
+    // 1. Immediately hydrate from local database snapshot on mount
     const local = getLocalMenuSnapshot();
     if (local && Array.isArray(local.categories) && local.categories.length > 0) {
       const grouped = buildSectionsFromData(local.categories, local.items || []);
@@ -191,6 +193,8 @@ export function usePublicMenu() {
         if (detail.categories && detail.items && Array.isArray(detail.categories)) {
           const grouped = buildSectionsFromData(detail.categories, detail.items);
           setSections(grouped);
+          cacheLocalMenu(detail.categories, detail.items);
+          return;
         }
       }
       fetchMenu();
@@ -221,6 +225,8 @@ export function usePublicMenu() {
           ) {
             const grouped = buildSectionsFromData(msgEvent.data.categories, msgEvent.data.items);
             setSections(grouped);
+            cacheLocalMenu(msgEvent.data.categories, msgEvent.data.items);
+            return;
           }
           fetchMenu();
         };

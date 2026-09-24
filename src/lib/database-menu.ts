@@ -59,12 +59,127 @@ export async function fetchDatabaseStats(): Promise<DatabaseStats | null> {
 }
 
 /**
+ * Fast background sync to Supabase without blocking the UI or throwing ON CONFLICT errors
+ */
+async function syncToSupabaseAsync(categories: DatabaseCategory[], items: DatabaseMenuItem[]) {
+  if (!isSupabaseConfigured) return;
+
+  try {
+    const isUUID = (str?: string | null): boolean =>
+      Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
+    // 1. Fetch existing categories and items from Supabase to match IDs
+    const [catRes, itemRes] = await Promise.all([
+      supabase.from("categories").select("id, slug, name"),
+      supabase.from("menu_items").select("id, name"),
+    ]);
+
+    const existingCats = (catRes.data as Array<{ id: string; slug: string; name: string }>) || [];
+    const existingItems = (itemRes.data as Array<{ id: string; name: string }>) || [];
+
+    const catMapBySlug = new Map(existingCats.map((c) => [c.slug, c.id]));
+    const itemMapByName = new Map(existingItems.map((i) => [i.name.toLowerCase().trim(), i.id]));
+
+    // 2. Prepare Category inserts vs updates
+    const catInserts: Array<Record<string, unknown>> = [];
+    const catUpdates: Array<Promise<unknown>> = [];
+
+    for (const cat of categories) {
+      const payload = {
+        name: cat.name,
+        slug: cat.slug || cat.id,
+        sort_order: cat.sort_order,
+        available: cat.available !== false,
+        deleted_at: cat.deleted_at || null,
+      };
+
+      const matchedId = cat.id && isUUID(cat.id) ? cat.id : catMapBySlug.get(cat.slug || cat.id);
+
+      if (matchedId) {
+        catUpdates.push(
+          Promise.resolve(supabase.from("categories").update(payload).eq("id", matchedId)),
+        );
+      } else {
+        catInserts.push(payload);
+      }
+    }
+
+    if (catInserts.length > 0) {
+      const { data: inserted } = await supabase.from("categories").insert(catInserts).select();
+      if (inserted) {
+        (inserted as Array<{ id: string; slug: string }>).forEach((c) =>
+          catMapBySlug.set(c.slug, c.id),
+        );
+      }
+    }
+    if (catUpdates.length > 0) {
+      await Promise.allSettled(catUpdates);
+    }
+
+    // Refresh category map for items foreign keys
+    const { data: refreshedCats } = await supabase.from("categories").select("id, slug, name");
+    const finalCatMap = new Map<string, string>();
+    (refreshedCats || []).forEach((c: { id: string; slug: string }) => {
+      finalCatMap.set(c.slug, c.id);
+      finalCatMap.set(c.id, c.id);
+    });
+
+    // 3. Prepare Item inserts vs updates
+    const itemInserts: Array<Record<string, unknown>> = [];
+    const itemUpdates: Array<Promise<unknown>> = [];
+
+    for (const item of items) {
+      const matchingCat = categories.find((c) => c.id === item.category_id);
+      let catUuid: string | null = null;
+      if (matchingCat && finalCatMap.has(matchingCat.slug)) {
+        catUuid = finalCatMap.get(matchingCat.slug) || null;
+      } else if (item.category_id && finalCatMap.has(item.category_id)) {
+        catUuid = finalCatMap.get(item.category_id) || null;
+      } else if (isUUID(item.category_id)) {
+        catUuid = item.category_id;
+      }
+
+      const payload = {
+        name: item.name,
+        description: item.description,
+        price: Number(item.price) || 0,
+        category_id: catUuid,
+        image_url: item.image_url,
+        available: item.available !== false,
+        sort_order: item.sort_order,
+        deleted_at: item.deleted_at || null,
+      };
+
+      const matchedItemId =
+        item.id && isUUID(item.id) ? item.id : itemMapByName.get(item.name.toLowerCase().trim());
+
+      if (matchedItemId) {
+        itemUpdates.push(
+          Promise.resolve(supabase.from("menu_items").update(payload).eq("id", matchedItemId)),
+        );
+      } else {
+        itemInserts.push(payload);
+      }
+    }
+
+    if (itemInserts.length > 0) {
+      await supabase.from("menu_items").insert(itemInserts);
+    }
+    if (itemUpdates.length > 0) {
+      await Promise.allSettled(itemUpdates);
+    }
+  } catch (err) {
+    console.warn("Supabase background sync notice:", err);
+  }
+}
+
+/**
  * Stores all menu details (categories and items) to the persistent database.
- * Syncs to:
+ * Syncs instantly to:
  * 1. Server database file (data/menu-db.json via /api/menu and /api/menu/store-all)
  * 2. Local storage snapshot cache
  * 3. Window & BroadcastChannel events for real-time customer menu updates
- * 4. Supabase database tables if configured
+ * 4. Supabase cloud database in parallel background
  */
 export async function storeAllMenuDetailsToDatabase(
   categories: DatabaseCategory[],
@@ -80,7 +195,7 @@ export async function storeAllMenuDetailsToDatabase(
   let serverSuccess = false;
   let serverMessage = "";
 
-  // 1. Persist to server database via /api/menu/store-all
+  // 1. Immediately persist to server database via /api/menu/store-all
   try {
     const res = await fetch("/api/menu/store-all", {
       method: "POST",
@@ -108,57 +223,17 @@ export async function storeAllMenuDetailsToDatabase(
     console.warn("Failed to POST to /api/menu/store-all:", err);
   }
 
-  // 2. Save to local storage snapshot and notify frontend listeners
+  // 2. Save to local storage snapshot and notify all frontend tabs immediately
   saveLocalMenuSnapshot(categories, items);
 
-  // 3. Persist to Supabase if configured
+  // 3. Fast non-blocking sync to Supabase in parallel
   if (isSupabaseConfigured) {
-    try {
-      const isUUID = (str?: string | null): boolean =>
-        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
-
-      // Upsert categories
-      for (const cat of categories) {
-        const catPayload = {
-          name: cat.name,
-          slug: cat.slug || cat.id,
-          sort_order: cat.sort_order,
-          available: cat.available !== false,
-          deleted_at: cat.deleted_at || null,
-        };
-
-        if (cat.id && isUUID(cat.id)) {
-          await supabase.from("categories").upsert({ ...catPayload, id: cat.id });
-        } else {
-          await supabase.from("categories").upsert(catPayload, { onConflict: "slug" });
-        }
-      }
-
-      // Upsert menu items
-      for (const item of items) {
-        const itemPayload = {
-          name: item.name,
-          description: item.description,
-          price: Number(item.price) || 0,
-          category_id: isUUID(item.category_id) ? item.category_id : null,
-          image_url: item.image_url,
-          available: item.available !== false,
-          sort_order: item.sort_order,
-          deleted_at: item.deleted_at || null,
-        };
-
-        if (item.id && isUUID(item.id)) {
-          await supabase.from("menu_items").upsert({ ...itemPayload, id: item.id });
-        } else {
-          await supabase.from("menu_items").upsert(itemPayload, { onConflict: "name" });
-        }
-      }
-    } catch (dbErr) {
-      console.warn("Supabase store-all sync error:", dbErr);
-    }
+    syncToSupabaseAsync(categories, items).catch((e) =>
+      console.warn("Supabase background sync:", e),
+    );
   }
 
-  // Broadcast event
+  // 4. Broadcast event
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent(MENU_ORDER_EVENT, {

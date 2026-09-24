@@ -514,12 +514,10 @@ export default {
               body = {};
             }
 
-            const categories =
-              Array.isArray(body.categories) && body.categories.length > 0
-                ? body.categories
-                : SEED_CATEGORIES;
-            const items =
-              Array.isArray(body.items) && body.items.length > 0 ? body.items : SEED_ITEMS;
+            const categories = Array.isArray(body.categories)
+              ? (body.categories as DbCategory[])
+              : SEED_CATEGORIES;
+            const items = Array.isArray(body.items) ? (body.items as DbMenuItem[]) : SEED_ITEMS;
 
             const written = writeDb(categories, items);
             return new Response(

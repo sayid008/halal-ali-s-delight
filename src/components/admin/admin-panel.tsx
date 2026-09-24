@@ -246,256 +246,86 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
     setDbTableError(null);
 
-    // If Supabase is not configured, load from server API database, local snapshot, or defaults
-    if (!isSupabaseConfigured) {
-      try {
-        const res = await fetch("/api/menu");
-        if (res.ok) {
-          const apiData = (await res.json()) as {
-            categories?: DatabaseCategory[];
-            items?: DatabaseMenuItem[];
-          };
-          if (apiData.categories && apiData.categories.length > 0) {
-            setCategories(apiData.categories);
-            setItems(apiData.items || []);
-            setHasInitialLoaded(true);
-            setLoading(false);
-            return;
-          }
+    // 1. Primary source: Load from server API database (/data/menu-db.json)
+    try {
+      const res = await fetch("/api/menu", {
+        headers: { "cache-control": "no-cache" },
+      });
+      if (res.ok) {
+        const apiData = (await res.json()) as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (
+          apiData.categories &&
+          Array.isArray(apiData.categories) &&
+          apiData.categories.length > 0
+        ) {
+          setCategories(apiData.categories);
+          setItems(apiData.items || []);
+          cacheLocalMenu(apiData.categories, apiData.items || []);
+          setHasInitialLoaded(true);
+          setLoading(false);
+          return;
         }
-      } catch {
-        // ignore fetch error
       }
-
-      const cached = getLocalMenuSnapshot();
-      if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-        setCategories(cached.categories);
-        setItems(cached.items || []);
-        saveLocalMenuSnapshot(cached.categories, cached.items || []);
-      } else {
-        setCategories(defaultCategories);
-        setItems(defaultItems);
-        saveLocalMenuSnapshot(defaultCategories, defaultItems);
-      }
-      setHasInitialLoaded(true);
-      setLoading(false);
-      return;
+    } catch {
+      // ignore fetch error, proceed to alternatives
     }
 
-    try {
-      const timeoutPromise = new Promise<{ data: null; error: { message: string; code: string } }>(
-        (resolve) =>
+    // 2. Secondary source: If Supabase is configured and server API had no data
+    if (isSupabaseConfigured) {
+      try {
+        const timeoutPromise = new Promise<{
+          data: null;
+          error: { message: string; code: string };
+        }>((resolve) =>
           setTimeout(
             () => resolve({ data: null, error: { message: "Request timeout", code: "TIMEOUT" } }),
-            3500,
+            2500,
           ),
-      );
-
-      const [catRes, itemRes] = await Promise.all([
-        Promise.race([
-          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-          timeoutPromise,
-        ]),
-        Promise.race([
-          supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
-          timeoutPromise,
-        ]),
-      ]);
-
-      const isCatTableMissing = Boolean(
-        catRes.error &&
-        (catRes.error.code === "PGRST205" ||
-          catRes.error.message.toLowerCase().includes("not find") ||
-          catRes.error.message.toLowerCase().includes("schema cache") ||
-          catRes.error.message.toLowerCase().includes("relation") ||
-          catRes.error.message.toLowerCase().includes("does not exist")),
-      );
-      const isItemTableMissing = Boolean(
-        itemRes.error &&
-        (itemRes.error.code === "PGRST205" ||
-          itemRes.error.message.toLowerCase().includes("not find") ||
-          itemRes.error.message.toLowerCase().includes("schema cache") ||
-          itemRes.error.message.toLowerCase().includes("relation") ||
-          itemRes.error.message.toLowerCase().includes("does not exist")),
-      );
-
-      if (isCatTableMissing || isItemTableMissing) {
-        const missing: string[] = [];
-        if (isCatTableMissing) missing.push("'categories'");
-        if (isItemTableMissing) missing.push("'menu_items'");
-        setDbTableError(
-          `Supabase table ${missing.join(" and ")} is not created in your database yet. Copy and run the SQL below in your Supabase SQL Editor.`,
         );
-      }
 
-      let loadedCategories = (catRes.data as DatabaseCategory[]) || [];
-      let loadedItems = (itemRes.data as DatabaseMenuItem[]) || [];
+        const [catRes, itemRes] = await Promise.all([
+          Promise.race([
+            supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+            timeoutPromise,
+          ]),
+          Promise.race([
+            supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+            timeoutPromise,
+          ]),
+        ]);
 
-      // Auto-purge any items or categories older than 30 days
-      const expiredItemIds = loadedItems
-        .filter((i) => i.deleted_at && getDaysRemaining(i.deleted_at) <= 0)
-        .map((i) => i.id);
+        const loadedCategories = (catRes.data as DatabaseCategory[]) || [];
+        const loadedItems = (itemRes.data as DatabaseMenuItem[]) || [];
 
-      if (expiredItemIds.length > 0) {
-        for (const id of expiredItemIds) {
-          supabase.from("menu_items").delete().eq("id", id);
+        if (loadedCategories.length > 0) {
+          setCategories(loadedCategories);
+          setItems(loadedItems);
+          saveLocalMenuSnapshot(loadedCategories, loadedItems);
+          setHasInitialLoaded(true);
+          setLoading(false);
+          return;
         }
-        loadedItems = loadedItems.filter((i) => !expiredItemIds.includes(i.id));
+      } catch (err) {
+        console.warn("Could not load from Supabase:", err);
       }
-
-      const expiredCatIds = loadedCategories
-        .filter((c) => c.deleted_at && getDaysRemaining(c.deleted_at) <= 0)
-        .map((c) => c.id);
-
-      if (expiredCatIds.length > 0) {
-        for (const id of expiredCatIds) {
-          supabase.from("categories").delete().eq("id", id);
-        }
-        loadedCategories = loadedCategories.filter((c) => !expiredCatIds.includes(c.id));
-      }
-
-      // If Supabase tables are completely empty on the very first initial load, seed them into the live database
-      if (
-        !hasInitialLoaded &&
-        loadedCategories.length === 0 &&
-        loadedItems.length === 0 &&
-        !catRes.error &&
-        !itemRes.error
-      ) {
-        try {
-          // Sync categories to live Supabase DB
-          const catInserts = homeSections.map((sec, idx) => ({
-            name: sec.title,
-            slug: sec.id,
-            sort_order: idx + 1,
-          }));
-
-          const { data: upsertedCats } = await supabase
-            .from("categories")
-            .upsert(catInserts, { onConflict: "slug" })
-            .select();
-
-          const catMap = new Map<string, string>();
-          if (upsertedCats && upsertedCats.length > 0) {
-            (upsertedCats as DatabaseCategory[]).forEach((c) => catMap.set(c.slug, c.id));
-            loadedCategories = upsertedCats as DatabaseCategory[];
-          } else {
-            loadedCategories = defaultCategories;
-          }
-
-          // Sync dishes to live Supabase DB
-          const dishInserts: Array<{
-            name: string;
-            description: string;
-            price: number;
-            category_id: string | null;
-            image_url: string | null;
-            available: boolean;
-            sort_order: number;
-          }> = [];
-
-          homeSections.forEach((sec, sIdx) => {
-            const catId = catMap.get(sec.id) || null;
-            sec.items.forEach((dish, dIdx) => {
-              let priceNum = 250;
-              if (typeof dish.price === "number") {
-                priceNum = dish.price < 50 ? Math.round(dish.price * 50) : dish.price;
-              } else if (typeof dish.price === "string") {
-                const parsed = parseFloat(dish.price.replace(/[^\d.]/g, ""));
-                if (!isNaN(parsed)) {
-                  priceNum = parsed < 50 ? Math.round(parsed * 50) : Math.round(parsed);
-                }
-              }
-
-              dishInserts.push({
-                name: dish.name,
-                description: dish.description,
-                price: priceNum,
-                category_id: catId,
-                image_url: dish.image || null,
-                available: true,
-                sort_order: (sIdx + 1) * 10 + (dIdx + 1),
-              });
-            });
-          });
-
-          const { data: insertedItems } = await supabase
-            .from("menu_items")
-            .insert(dishInserts)
-            .select();
-
-          if (insertedItems && insertedItems.length > 0) {
-            loadedItems = insertedItems as DatabaseMenuItem[];
-          } else if (loadedItems.length === 0) {
-            loadedItems = defaultItems;
-          }
-        } catch {
-          if (loadedCategories.length === 0) loadedCategories = defaultCategories;
-          if (loadedItems.length === 0) loadedItems = defaultItems;
-        }
-      } else if (catRes.error || itemRes.error) {
-        // Fallback to local snapshot or defaults for whichever table errored
-        const cached = getLocalMenuSnapshot();
-        if (catRes.error) {
-          if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-            loadedCategories = cached.categories;
-          } else {
-            loadedCategories = defaultCategories;
-          }
-        }
-        if (itemRes.error) {
-          if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
-            loadedItems = cached.items;
-          } else {
-            loadedItems = defaultItems;
-          }
-        }
-      }
-
-      if (loadedCategories.length === 0) {
-        const cached = getLocalMenuSnapshot();
-        if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-          loadedCategories = cached.categories;
-        } else {
-          loadedCategories = defaultCategories;
-        }
-      }
-      if (loadedItems.length === 0) {
-        const cached = getLocalMenuSnapshot();
-        if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
-          loadedItems = cached.items;
-        } else {
-          loadedItems = defaultItems;
-        }
-      }
-
-      if (loadedCategories.length === 0) {
-        loadedCategories = defaultCategories;
-      }
-      if (loadedItems.length === 0) {
-        loadedItems = defaultItems;
-      }
-
-      setCategories(loadedCategories);
-      setItems(loadedItems);
-      saveLocalMenuSnapshot(loadedCategories, loadedItems);
-      setHasInitialLoaded(true);
-    } catch (err: unknown) {
-      console.error("Error loading admin data:", err);
-      const cached = getLocalMenuSnapshot();
-      if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
-        setCategories(cached.categories);
-        setItems(cached.items || []);
-        saveLocalMenuSnapshot(cached.categories, cached.items || []);
-      } else {
-        setCategories(defaultCategories);
-        setItems(defaultItems);
-        saveLocalMenuSnapshot(defaultCategories, defaultItems);
-      }
-      setHasInitialLoaded(true);
-    } finally {
-      setLoading(false);
     }
+
+    // 3. Fallback: local snapshot cache or defaults
+    const cached = getLocalMenuSnapshot();
+    if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+      setCategories(cached.categories);
+      setItems(cached.items || []);
+      saveLocalMenuSnapshot(cached.categories, cached.items || []);
+    } else {
+      setCategories(defaultCategories);
+      setItems(defaultItems);
+      saveLocalMenuSnapshot(defaultCategories, defaultItems);
+    }
+    setHasInitialLoaded(true);
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -504,9 +334,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const handleLocalUpdate = (e?: Event) => {
       if (e && "detail" in e && e.detail) {
         const detail = (e as CustomEvent).detail as {
+          source?: string;
           categories?: DatabaseCategory[];
           items?: DatabaseMenuItem[];
         };
+        // If event came from current admin panel, ignore to avoid overwriting active state
+        if (detail.source === "admin-panel") {
+          return;
+        }
         if (detail.categories && Array.isArray(detail.categories)) {
           setCategories(detail.categories);
         }
@@ -514,7 +349,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           setItems(detail.items);
         }
       }
-      loadData();
     };
 
     const handleVisibilityChange = () => {
@@ -535,6 +369,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         bc = new BroadcastChannel("halal_ali_menu_channel");
         bc.onmessage = (msgEvent) => {
           if (msgEvent.data && typeof msgEvent.data === "object") {
+            if (msgEvent.data.source === "admin-panel") return;
             if (msgEvent.data.categories && Array.isArray(msgEvent.data.categories)) {
               setCategories(msgEvent.data.categories);
             }
@@ -542,7 +377,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               setItems(msgEvent.data.items);
             }
           }
-          loadData();
         };
       } catch {
         // ignore channel errors
@@ -918,115 +752,73 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
     toast.success(isEditing ? `"${data.name}" updated!` : `"${data.name}" added to menu!`);
 
-    // Sync to Supabase in the background if configured
+    // Sync to Supabase in the background if configured (non-blocking)
     if (isSupabaseConfigured) {
-      try {
-        const isUUIDFormat = (str?: string | null): boolean =>
-          Boolean(
-            str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
-          );
-
-        let dbCategoryId = data.category_id;
-        if (dbCategoryId && !isUUIDFormat(dbCategoryId)) {
-          const matched = categories.find(
-            (c) =>
-              c.id === dbCategoryId ||
-              c.slug === dbCategoryId ||
-              c.name.toLowerCase() === dbCategoryId?.toLowerCase(),
-          );
-          if (matched && isUUIDFormat(matched.id)) {
-            dbCategoryId = matched.id;
-          }
-        }
-
-        const dbPayload = {
-          name: data.name,
-          description: data.description,
-          price: data.price,
-          category_id: dbCategoryId && isUUIDFormat(dbCategoryId) ? dbCategoryId : null,
-          image_url: data.image_url,
-          available: data.available,
-          sort_order: data.sort_order,
-        };
-
-        if (isEditing) {
-          let updatedInDb = false;
-
-          if (data.id) {
-            const { data: resData, error: err } = await supabase
-              .from("menu_items")
-              .update(dbPayload)
-              .eq("id", data.id)
-              .select();
-            if (!err && resData && resData.length > 0) {
-              updatedInDb = true;
-            }
-          }
-
-          if (!updatedInDb && existingItem?.name) {
-            const { data: resData, error: errByName } = await supabase
-              .from("menu_items")
-              .update(dbPayload)
-              .eq("name", existingItem.name)
-              .select();
-            if (!errByName && resData && resData.length > 0) {
-              updatedInDb = true;
-              if (resData[0]?.id) {
-                const realDbId = resData[0].id;
-                newItems = newItems.map((i) => (i.id === itemId ? { ...i, id: realDbId } : i));
-                setItems(newItems);
-                saveLocalMenuSnapshot(categories, newItems);
-              }
-            }
-          }
-
-          if (!updatedInDb) {
-            const { data: resData, error: errByName } = await supabase
-              .from("menu_items")
-              .update(dbPayload)
-              .eq("name", data.name)
-              .select();
-            if (!errByName && resData && resData.length > 0) {
-              updatedInDb = true;
-              if (resData[0]?.id) {
-                const realDbId = resData[0].id;
-                newItems = newItems.map((i) => (i.id === itemId ? { ...i, id: realDbId } : i));
-                setItems(newItems);
-                saveLocalMenuSnapshot(categories, newItems);
-              }
-            }
-          }
-
-          if (!updatedInDb) {
-            const { data: inserted } = await supabase
-              .from("menu_items")
-              .insert(dbPayload)
-              .select()
-              .single();
-            if (inserted?.id) {
-              const realDbId = inserted.id;
-              newItems = newItems.map((i) => (i.id === itemId ? { ...i, id: realDbId } : i));
-              setItems(newItems);
-              saveLocalMenuSnapshot(categories, newItems);
-            }
-          }
-        } else {
-          const { data: inserted } = await supabase
-            .from("menu_items")
-            .insert(dbPayload)
-            .select()
-            .single();
-          if (inserted?.id) {
-            const finalItems = newItems.map((i) =>
-              i.id === itemId ? { ...i, id: inserted.id } : i,
+      (async () => {
+        try {
+          const isUUIDFormat = (str?: string | null): boolean =>
+            Boolean(
+              str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
             );
-            setItems(finalItems);
-            saveLocalMenuSnapshot(categories, finalItems);
+
+          let dbCategoryId = data.category_id;
+          if (dbCategoryId && !isUUIDFormat(dbCategoryId)) {
+            const matched = categories.find(
+              (c) =>
+                c.id === dbCategoryId ||
+                c.slug === dbCategoryId ||
+                c.name.toLowerCase() === dbCategoryId?.toLowerCase(),
+            );
+            if (matched && isUUIDFormat(matched.id)) {
+              dbCategoryId = matched.id;
+            }
           }
+
+          const dbPayload = {
+            name: data.name,
+            description: data.description,
+            price: data.price,
+            category_id: dbCategoryId && isUUIDFormat(dbCategoryId) ? dbCategoryId : null,
+            image_url: data.image_url,
+            available: data.available,
+            sort_order: data.sort_order,
+          };
+
+          if (isEditing) {
+            let updatedInDb = false;
+
+            if (data.id && isUUIDFormat(data.id)) {
+              const { data: resData, error: err } = await supabase
+                .from("menu_items")
+                .update(dbPayload)
+                .eq("id", data.id)
+                .select();
+              if (!err && resData && resData.length > 0) {
+                updatedInDb = true;
+              }
+            }
+
+            if (!updatedInDb && existingItem?.name) {
+              const { data: resData, error: errByName } = await supabase
+                .from("menu_items")
+                .update(dbPayload)
+                .eq("name", existingItem.name)
+                .select();
+              if (!errByName && resData && resData.length > 0) {
+                updatedInDb = true;
+              }
+            }
+
+            if (!updatedInDb) {
+              await supabase.from("menu_items").insert(dbPayload);
+            }
+          } else {
+            await supabase.from("menu_items").insert(dbPayload);
+          }
+        } catch (dbErr) {
+          console.warn("Could not sync item to Supabase:", dbErr);
         }
-      } catch (dbErr) {
-        console.warn("Could not sync item to Supabase:", dbErr);
-      }
+      })();
     }
   }
 
@@ -1082,97 +874,57 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
     );
 
-    // Sync to Supabase in the background if configured
+    // Sync to Supabase in the background if configured (non-blocking)
     if (isSupabaseConfigured) {
-      try {
-        const isUUIDFormat = (str?: string | null): boolean =>
-          Boolean(
-            str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
-          );
+      (async () => {
+        try {
+          const isUUIDFormat = (str?: string | null): boolean =>
+            Boolean(
+              str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
+            );
 
-        const dbPayload = {
-          name: data.name,
-          slug: data.slug,
-          sort_order: data.sort_order,
-          available: data.available,
-        };
+          const dbPayload = {
+            name: data.name,
+            slug: data.slug,
+            sort_order: data.sort_order,
+            available: data.available,
+          };
 
-        if (isEditing) {
-          let updatedInDb = false;
+          if (isEditing) {
+            let updatedInDb = false;
 
-          if (data.id) {
-            const { data: resData, error: err } = await supabase
-              .from("categories")
-              .update(dbPayload)
-              .eq("id", data.id)
-              .select();
-            if (!err && resData && resData.length > 0) {
-              updatedInDb = true;
-            }
-          }
-
-          if (!updatedInDb && existingCat?.slug) {
-            const { data: resData, error: errBySlug } = await supabase
-              .from("categories")
-              .update(dbPayload)
-              .eq("slug", existingCat.slug)
-              .select();
-            if (!errBySlug && resData && resData.length > 0) {
-              updatedInDb = true;
-              if (resData[0]?.id) {
-                const realDbId = resData[0].id;
-                newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
-                setCategories(newCats);
-                saveLocalMenuSnapshot(newCats, newItems);
+            if (data.id && isUUIDFormat(data.id)) {
+              const { data: resData, error: err } = await supabase
+                .from("categories")
+                .update(dbPayload)
+                .eq("id", data.id)
+                .select();
+              if (!err && resData && resData.length > 0) {
+                updatedInDb = true;
               }
             }
-          }
 
-          if (!updatedInDb) {
-            const { data: resData, error: errBySlug } = await supabase
-              .from("categories")
-              .update(dbPayload)
-              .eq("slug", data.slug)
-              .select();
-            if (!errBySlug && resData && resData.length > 0) {
-              updatedInDb = true;
-              if (resData[0]?.id) {
-                const realDbId = resData[0].id;
-                newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
-                setCategories(newCats);
-                saveLocalMenuSnapshot(newCats, newItems);
+            if (!updatedInDb && existingCat?.slug) {
+              const { data: resData, error: errBySlug } = await supabase
+                .from("categories")
+                .update(dbPayload)
+                .eq("slug", existingCat.slug)
+                .select();
+              if (!errBySlug && resData && resData.length > 0) {
+                updatedInDb = true;
               }
             }
-          }
 
-          if (!updatedInDb) {
-            const { data: inserted } = await supabase
-              .from("categories")
-              .insert(dbPayload)
-              .select()
-              .single();
-            if (inserted?.id) {
-              const realDbId = inserted.id;
-              newCats = newCats.map((c) => (c.id === catId ? { ...c, id: realDbId } : c));
-              setCategories(newCats);
-              saveLocalMenuSnapshot(newCats, newItems);
+            if (!updatedInDb) {
+              await supabase.from("categories").insert(dbPayload);
             }
+          } else {
+            await supabase.from("categories").insert(dbPayload);
           }
-        } else {
-          const { data: inserted } = await supabase
-            .from("categories")
-            .insert(dbPayload)
-            .select()
-            .single();
-          if (inserted?.id) {
-            const finalCats = newCats.map((c) => (c.id === catId ? { ...c, id: inserted.id } : c));
-            setCategories(finalCats);
-            saveLocalMenuSnapshot(finalCats, newItems);
-          }
+        } catch (dbErr) {
+          console.warn("Could not sync category to Supabase:", dbErr);
         }
-      } catch (dbErr) {
-        console.warn("Could not sync category to Supabase:", dbErr);
-      }
+      })();
     }
   }
 

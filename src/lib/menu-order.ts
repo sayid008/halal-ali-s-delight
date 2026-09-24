@@ -33,6 +33,7 @@ export function cacheLocalMenu(categories: DatabaseCategory[], items: DatabaseMe
 export function saveLocalMenuSnapshot(
   categories: DatabaseCategory[],
   items: DatabaseMenuItem[],
+  source: string = "admin-panel",
 ): void {
   cacheLocalMenu(categories, items);
 
@@ -49,13 +50,13 @@ export function saveLocalMenuSnapshot(
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent(MENU_ORDER_EVENT, {
-        detail: { type: "snapshot", categories, items },
+        detail: { type: "snapshot", source, categories, items },
       }),
     );
     if (typeof BroadcastChannel !== "undefined") {
       try {
         const bc = new BroadcastChannel("halal_ali_menu_channel");
-        bc.postMessage({ type: "snapshot_updated", categories, items });
+        bc.postMessage({ type: "snapshot_updated", source, categories, items });
         bc.close();
       } catch {
         // ignore channel errors
