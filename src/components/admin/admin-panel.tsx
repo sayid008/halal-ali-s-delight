@@ -43,13 +43,48 @@ import {
   Sparkles,
   Save,
   Check,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { menuSections as homeSections } from "@/data/menu";
+import { defaultDishCategoryMap } from "@/lib/database-menu";
 
 interface AdminPanelProps {
   session: Session | AdminUserSession | { user: { email?: string } };
   onSignOut: () => void;
+}
+
+function normalizeItemsWithCategories(
+  itemsList: DatabaseMenuItem[],
+  catList: DatabaseCategory[],
+): DatabaseMenuItem[] {
+  const catBySlug = new Map<string, string>();
+  const catByName = new Map<string, string>();
+  const catById = new Set<string>();
+
+  catList.forEach((c) => {
+    if (c.id) catById.add(c.id);
+    if (c.slug) catBySlug.set(c.slug.toLowerCase().trim(), c.id);
+    if (c.name) catByName.set(c.name.toLowerCase().trim(), c.id);
+  });
+
+  return itemsList.map((item) => {
+    let resolvedCatId = item.category_id;
+    if (!resolvedCatId || !catById.has(resolvedCatId)) {
+      const slug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
+      if (slug && catBySlug.has(slug)) {
+        resolvedCatId = catBySlug.get(slug) || null;
+      } else if (item.category_id && catBySlug.has(item.category_id.toLowerCase().trim())) {
+        resolvedCatId = catBySlug.get(item.category_id.toLowerCase().trim()) || null;
+      } else if (item.category_id && catByName.has(item.category_id.toLowerCase().trim())) {
+        resolvedCatId = catByName.get(item.category_id.toLowerCase().trim()) || null;
+      }
+    }
+    return {
+      ...item,
+      category_id: resolvedCatId,
+    };
+  });
 }
 
 // Convert home page static menu items into structured defaults
@@ -175,17 +210,29 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     [batchSync],
   );
 
-  const loadData = useCallback(async () => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const loadData = useCallback(async (isManualRefresh: boolean = false) => {
+    if (isManualRefresh) {
+      setIsRefreshing(true);
+    }
+
     // 1. Instant optimistic hydrate from local cache
     const cached = getLocalMenuSnapshot();
-    if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+    if (
+      !isManualRefresh &&
+      cached &&
+      Array.isArray(cached.categories) &&
+      cached.categories.length > 0
+    ) {
+      const normalizedCached = normalizeItemsWithCategories(cached.items || [], cached.categories);
       setCategories(cached.categories);
-      setItems(cached.items || []);
-    } else {
+      setItems(normalizedCached);
+    } else if (!isManualRefresh) {
       setLoading(true);
     }
 
-    // 2. If Supabase is configured, fetch live from Supabase
+    // 2. Fetch live directly from Supabase database
     if (isSupabaseConfigured) {
       try {
         const timeoutPromise = new Promise<{
@@ -213,11 +260,23 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         const loadedItems = (itemRes.data as DatabaseMenuItem[]) || [];
 
         if (loadedCategories.length > 0 || loadedItems.length > 0) {
-          setCategories(loadedCategories);
-          setItems(loadedItems);
-          saveLocalMenuSnapshot(loadedCategories, loadedItems, "admin-load");
+          const finalCategories =
+            loadedCategories.length > 0 ? loadedCategories : defaultCategories;
+          const finalItems = normalizeItemsWithCategories(
+            loadedItems.length > 0 ? loadedItems : defaultItems,
+            finalCategories,
+          );
+          setCategories(finalCategories);
+          setItems(finalItems);
+          saveLocalMenuSnapshot(finalCategories, finalItems, "admin-load");
           setHasInitialLoaded(true);
           setLoading(false);
+          if (isManualRefresh) {
+            setIsRefreshing(false);
+            toast.success(
+              `Fetched all ${finalItems.length} dishes & ${finalCategories.length} categories from Supabase!`,
+            );
+          }
           return;
         }
       } catch (err) {
@@ -225,18 +284,23 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       }
     }
 
-    // 3. Fallback to cached local snapshot
+    // 3. Fallback to cached local snapshot or defaults
     if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+      const normalizedCached = normalizeItemsWithCategories(cached.items || [], cached.categories);
       setCategories(cached.categories);
-      setItems(cached.items || []);
+      setItems(normalizedCached);
     } else {
+      const normalizedDefault = normalizeItemsWithCategories(defaultItems, defaultCategories);
       setCategories(defaultCategories);
-      setItems(defaultItems);
-      saveLocalMenuSnapshot(defaultCategories, defaultItems);
+      setItems(normalizedDefault);
+      saveLocalMenuSnapshot(defaultCategories, normalizedDefault);
     }
 
     setHasInitialLoaded(true);
     setLoading(false);
+    if (isManualRefresh) {
+      setIsRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -605,10 +669,27 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const map = new Map<string, string>();
     categories.forEach((cat) => {
       map.set(cat.id, cat.name);
-      map.set(cat.slug, cat.name);
+      if (cat.slug) {
+        map.set(cat.slug, cat.name);
+        map.set(cat.slug.toLowerCase(), cat.name);
+      }
+      if (cat.name) {
+        map.set(cat.name.toLowerCase(), cat.name);
+      }
     });
     return map;
   }, [categories]);
+
+  function getItemCategoryName(item: DatabaseMenuItem): string {
+    if (item.category_id && categoryMap.has(item.category_id)) {
+      return categoryMap.get(item.category_id) || "Category";
+    }
+    const defaultSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
+    if (defaultSlug && categoryMap.has(defaultSlug)) {
+      return categoryMap.get(defaultSlug) || "Category";
+    }
+    return "Category";
+  }
 
   // Reorder categories step-by-step with immediate database persistence
   async function handleReorderCategories(fromIdx: number, toIdx: number) {
@@ -716,6 +797,20 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => loadData(true)}
+              disabled={isRefreshing || batchSync.isSaving}
+              className="h-8 px-2 sm:px-2.5 gap-1.5 text-xs font-medium border-border/80 bg-background text-foreground hover:bg-muted transition-all cursor-pointer"
+              title="Fetch fresh live data from Supabase database"
+            >
+              <RefreshCw
+                className={`size-3.5 text-muted-foreground ${isRefreshing ? "animate-spin text-gold" : ""}`}
+              />
+              <span className="hidden xs:inline">{isRefreshing ? "Fetching..." : "Fetch DB"}</span>
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
@@ -1033,10 +1128,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                               {formatPrice(item.price)}
                             </span>
                             <span className="text-muted-foreground text-[10px] shrink-0">•</span>
-                            <span className="inline-flex rounded bg-muted/80 px-1.5 py-0.2 text-[10px] font-normal text-muted-foreground truncate max-w-[100px]">
-                              {item.category_id
-                                ? categoryMap.get(item.category_id) || "Category"
-                                : "Category"}
+                            <span className="inline-flex rounded bg-muted/80 px-1.5 py-0.2 text-[10px] font-medium text-foreground truncate max-w-[120px]">
+                              {getItemCategoryName(item)}
                             </span>
                             {/* 1-tap Active/Inactive toggle button */}
                             <button
@@ -1174,10 +1267,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
                             {/* Category Badge */}
                             <td className="px-4 py-2 whitespace-nowrap">
-                              <span className="inline-flex rounded bg-muted/80 px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
-                                {item.category_id
-                                  ? categoryMap.get(item.category_id) || "Category"
-                                  : "Category"}
+                              <span className="inline-flex rounded-md bg-gold/10 border border-gold/25 px-2 py-0.5 text-[11px] font-medium text-foreground">
+                                {getItemCategoryName(item)}
                               </span>
                             </td>
 

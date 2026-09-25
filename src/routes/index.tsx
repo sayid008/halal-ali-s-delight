@@ -4,7 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 import { restaurant } from "@/data/menu";
-import { usePublicMenu } from "@/hooks/use-public-menu";
+import { usePublicMenu, fetchPublicMenuFromDatabase } from "@/hooks/use-public-menu";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
 const description =
@@ -21,21 +21,25 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
+  loader: async () => {
+    return await fetchPublicMenuFromDatabase();
+  },
   component: Index,
 });
 
 function Index() {
-  const { sections } = usePublicMenu();
+  const initialSections = Route.useLoaderData();
+  const { sections } = usePublicMenu(initialSections);
 
-  // Seamless immediate render of categories and items
-  const displaySections = sections.map((s) => ({
-    id: s.id,
-    title: s.title,
-    items: s.items.map((item) => ({
-      name: item.name,
-      description: item.description,
-      price: item.price,
-      image: item.image_url ?? undefined,
+  // Seamless immediate render of categories and items with bulletproof null checks
+  const displaySections = (sections && sections.length > 0 ? sections : []).map((s) => ({
+    id: s?.id ?? "category",
+    title: s?.title ?? "Menu",
+    items: (s?.items || []).map((item) => ({
+      name: item?.name ?? "",
+      description: item?.description ?? "",
+      price: item?.price ?? 0,
+      image: item?.image_url ?? undefined,
     })),
   }));
 

@@ -52,7 +52,7 @@ export function isUUID(str?: string | null): boolean {
   );
 }
 
-const defaultDishCategoryMap: Record<string, string> = {
+export const defaultDishCategoryMap: Record<string, string> = {
   "vegetable samosas": "starters",
   "chicken pakora": "starters",
   "onion bhaji": "starters",
@@ -293,15 +293,23 @@ export async function checkChangesAndSyncToSupabase(
       diffSummary.categoriesDeleted = categoriesToDelete.length;
     }
 
-    // 4. Fetch refreshed categories to ensure accurate UUID map for menu items foreign keys
+    // 4. Fetch refreshed categories to ensure accurate UUID and slug maps
     const { data: refreshedCats } = await supabase.from("categories").select("id, slug, name");
     const catUuidMap = new Map<string, string>();
+    const catSlugMap = new Map<string, string>();
 
     (refreshedCats || []).forEach((c: { id: string; slug: string; name: string }) => {
       if (c.id) {
         catUuidMap.set(c.id, c.id);
-        if (c.slug) catUuidMap.set(c.slug.toLowerCase().trim(), c.id);
-        if (c.name) catUuidMap.set(c.name.toLowerCase().trim(), c.id);
+        if (c.slug) {
+          catUuidMap.set(c.slug.toLowerCase().trim(), c.id);
+          catSlugMap.set(c.id, c.slug.toLowerCase().trim());
+          catSlugMap.set(c.slug.toLowerCase().trim(), c.slug.toLowerCase().trim());
+        }
+        if (c.name) {
+          catUuidMap.set(c.name.toLowerCase().trim(), c.id);
+          if (c.slug) catSlugMap.set(c.name.toLowerCase().trim(), c.slug.toLowerCase().trim());
+        }
       }
     });
 
@@ -319,17 +327,26 @@ export async function checkChangesAndSyncToSupabase(
     const matchedDbItemIds = new Set<string>();
 
     for (const item of adminItems) {
-      // Resolve target category UUID
+      // Resolve target category UUID and slug
       let targetCatUuid: string | null = null;
+      let targetCatSlug: string | null = null;
+
       if (item.category_id && catUuidMap.has(item.category_id)) {
         targetCatUuid = catUuidMap.get(item.category_id) || null;
+        targetCatSlug = catSlugMap.get(item.category_id) || null;
       } else if (item.category_id && isUUID(item.category_id)) {
         targetCatUuid = item.category_id;
+        targetCatSlug = catSlugMap.get(item.category_id) || null;
       } else {
         const fallbackSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
         if (fallbackSlug && catUuidMap.has(fallbackSlug)) {
           targetCatUuid = catUuidMap.get(fallbackSlug) || null;
+          targetCatSlug = fallbackSlug;
         }
+      }
+
+      if (!targetCatSlug && targetCatUuid && catSlugMap.has(targetCatUuid)) {
+        targetCatSlug = catSlugMap.get(targetCatUuid) || null;
       }
 
       let matchedDbItem: DatabaseMenuItem | undefined;
@@ -340,9 +357,16 @@ export async function checkChangesAndSyncToSupabase(
         matchedDbItem = dbItemByName.get(item.name.toLowerCase().trim());
       }
 
+      // Preserve clean description and embed category slug tag
+      const rawDesc = item.description || "";
+      const cleanDesc = rawDesc.replace(/\s*<!--cat:[a-zA-Z0-9_-]+-->\s*/g, "").trim();
+      const finalDesc = targetCatSlug
+        ? `${cleanDesc} <!--cat:${targetCatSlug}-->`.trim()
+        : cleanDesc || null;
+
       const itemPayload = {
         name: item.name.trim(),
-        description: item.description?.trim() || null,
+        description: finalDesc,
         price: Number(item.price) || 0,
         category_id: targetCatUuid,
         image_url: item.image_url || null,
@@ -356,8 +380,7 @@ export async function checkChangesAndSyncToSupabase(
         matchedDbItemIds.add(matchedDbItem.id);
 
         const nameChanged = matchedDbItem.name.trim() !== item.name.trim();
-        const descChanged =
-          (matchedDbItem.description?.trim() || "") !== (item.description?.trim() || "");
+        const descChanged = (matchedDbItem.description?.trim() || "") !== (finalDesc?.trim() || "");
         const priceChanged = Math.abs(Number(matchedDbItem.price) - Number(item.price)) > 0.001;
         const catChanged = (matchedDbItem.category_id || null) !== (targetCatUuid || null);
         const imgChanged = (matchedDbItem.image_url || null) !== (item.image_url || null);
@@ -394,7 +417,7 @@ export async function checkChangesAndSyncToSupabase(
       }
     }
 
-    // 6. Apply Item changes to Supabase
+    // 6. Apply Item changes to Supabase with fallback for foreign key constraints
     if (itemsToInsert.length > 0) {
       const { data: insertedItems, error: itemInsErr } = await supabase
         .from("menu_items")
@@ -402,16 +425,40 @@ export async function checkChangesAndSyncToSupabase(
         .select();
 
       if (itemInsErr) {
-        console.warn("Item insert notice:", itemInsErr);
+        if (itemInsErr.message.includes("violates foreign key constraint")) {
+          // Retry without category_id so item details are 100% stored in Supabase
+          const safePayloads = itemsToInsert.map(({ category_id, ...rest }) => ({
+            ...rest,
+            category_id: null,
+          }));
+          const { data: retryItems } = await supabase
+            .from("menu_items")
+            .insert(safePayloads)
+            .select();
+          if (retryItems) {
+            diffSummary.itemsAdded = retryItems.length;
+          }
+        } else {
+          console.warn("Item insert notice:", itemInsErr);
+        }
       } else if (insertedItems) {
         diffSummary.itemsAdded = insertedItems.length;
       }
     }
 
     if (itemsToUpdate.length > 0) {
-      const updatePromises = itemsToUpdate.map((u) =>
-        supabase.from("menu_items").update(u.payload).eq("id", u.id),
-      );
+      const updatePromises = itemsToUpdate.map(async (u) => {
+        const res = await supabase.from("menu_items").update(u.payload).eq("id", u.id);
+        if (res.error && res.error.message.includes("violates foreign key constraint")) {
+          // If category_id FK violated, update with category_id: null so price/name/desc/avail always save
+          const { category_id, ...safePayload } = u.payload;
+          return await supabase
+            .from("menu_items")
+            .update({ ...safePayload, category_id: null })
+            .eq("id", u.id);
+        }
+        return res;
+      });
       await Promise.allSettled(updatePromises);
       diffSummary.itemsUpdated = itemsToUpdate.length;
     }
@@ -430,8 +477,35 @@ export async function checkChangesAndSyncToSupabase(
       supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
     ]);
 
-    const freshCategories = (finalCatRes.data as DatabaseCategory[]) || adminCategories;
-    const freshItems = (finalItemRes.data as DatabaseMenuItem[]) || adminItems;
+    const rawFreshCategories = (finalCatRes.data as DatabaseCategory[]) || adminCategories;
+    const rawFreshItems = (finalItemRes.data as DatabaseMenuItem[]) || adminItems;
+
+    // Clean up description tags and resolve category_id
+    const freshCategories = rawFreshCategories;
+    const freshItems = rawFreshItems.map((item) => {
+      const tagMatch = (item.description || "").match(/<!--cat:([a-zA-Z0-9_-]+)-->/);
+      const taggedSlug = tagMatch ? tagMatch[1].toLowerCase().trim() : null;
+      const cleanDesc = (item.description || "")
+        .replace(/\s*<!--cat:[a-zA-Z0-9_-]+-->\s*/g, "")
+        .trim();
+
+      let resolvedCatId = item.category_id;
+      if (!resolvedCatId && taggedSlug && catUuidMap.has(taggedSlug)) {
+        resolvedCatId = catUuidMap.get(taggedSlug) || null;
+      }
+      if (!resolvedCatId) {
+        const fallbackSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
+        if (fallbackSlug && catUuidMap.has(fallbackSlug)) {
+          resolvedCatId = catUuidMap.get(fallbackSlug) || null;
+        }
+      }
+
+      return {
+        ...item,
+        description: cleanDesc || null,
+        category_id: resolvedCatId,
+      };
+    });
 
     // Cache locally & broadcast instant updates
     saveLocalMenuSnapshot(freshCategories, freshItems, "supabase-sync");

@@ -20,19 +20,19 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
 
   const categories: Category[] = [
     { id: "all", label: "All Items", image: heroBiryani },
-    ...sections.map((section) => ({
+    ...(sections || []).map((section) => ({
       id: section.id,
       label: section.title,
-      image: section.items.find((item) => item.image)?.image ?? heroBiryani,
+      image: section.items?.find((item) => item?.image)?.image ?? heroBiryani,
     })),
   ];
   const visibleSections =
     selected === "all"
-      ? sections.filter((s) => s.items.length > 0)
-      : sections.filter(({ id }) => id === selected);
+      ? (sections || []).filter((s) => (s.items?.length ?? 0) > 0)
+      : (sections || []).filter(({ id }) => id === selected);
 
   useEffect(() => {
-    if (selected !== "all" && !sections.some((s) => s.id === selected)) {
+    if (selected !== "all" && !(sections || []).some((s) => s.id === selected)) {
       setSelected("all");
     }
   }, [sections, selected]);
@@ -136,9 +136,9 @@ export function HomeMenuBrowser({ sections }: { sections: MenuSection[] }) {
               visibleSections.map((section) => (
                 <div key={section.id} className="space-y-5">
                   <h3 className="font-serif text-2xl">{section.title}</h3>
-                  {section.items.length > 0 ? (
+                  {(section.items?.length ?? 0) > 0 ? (
                     <div className="grid gap-6 md:grid-cols-2 md:gap-x-10">
-                      {section.items.map((item) => (
+                      {(section.items || []).map((item) => (
                         <MenuItemRow key={item.name} item={item} />
                       ))}
                     </div>

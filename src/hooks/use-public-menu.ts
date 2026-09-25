@@ -82,17 +82,37 @@ export function buildSectionsFromData(
     "masala chai": "desserts",
   };
 
-  // Step 1: Match items with explicit category assignments
+  // Step 1: Match items with explicit category assignments or tags
   items.forEach((item) => {
-    let matchedCat = sortedCategories.find(
-      (c) =>
-        Boolean(item.category_id) &&
-        (item.category_id === c.id ||
-          item.category_id === c.slug ||
-          (c.slug && item.category_id === `cat-${c.slug}`) ||
-          (c.slug && item.category_id?.includes(c.slug)) ||
-          (c.name && item.category_id?.toLowerCase() === c.name.toLowerCase())),
-    );
+    // 1a. Check for embedded category tag in description: <!--cat:slug-->
+    const catTagMatch = (item.description || "").match(/<!--cat:([a-zA-Z0-9_-]+)-->/);
+    const taggedSlug = catTagMatch ? catTagMatch[1].toLowerCase().trim() : null;
+    const cleanDescription = (item.description || "")
+      .replace(/\s*<!--cat:[a-zA-Z0-9_-]+-->\s*/g, "")
+      .trim();
+
+    let matchedCat: DatabaseCategory | undefined;
+
+    if (taggedSlug) {
+      matchedCat = sortedCategories.find(
+        (c) =>
+          (c.slug && c.slug.toLowerCase().trim() === taggedSlug) ||
+          c.id === taggedSlug ||
+          (c.name && c.name.toLowerCase().trim() === taggedSlug),
+      );
+    }
+
+    if (!matchedCat) {
+      matchedCat = sortedCategories.find(
+        (c) =>
+          Boolean(item.category_id) &&
+          (item.category_id === c.id ||
+            item.category_id === c.slug ||
+            (c.slug && item.category_id === `cat-${c.slug}`) ||
+            (c.slug && item.category_id?.includes(c.slug)) ||
+            (c.name && item.category_id?.toLowerCase() === c.name.toLowerCase())),
+      );
+    }
 
     if (!matchedCat && defaultDishCategoryMap[item.name.toLowerCase().trim()]) {
       const targetSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
@@ -112,7 +132,7 @@ export function buildSectionsFromData(
         sec.items.push({
           id: item.id,
           name: item.name,
-          description: item.description ?? "",
+          description: cleanDescription,
           price: Number(item.price),
           image_url: item.image_url,
           available: item.available !== false,
@@ -130,10 +150,13 @@ export function buildSectionsFromData(
     const sec = sectionMap.get(defaultTarget.id);
     if (sec) {
       unmatchedItems.forEach((item) => {
+        const cleanDescription = (item.description || "")
+          .replace(/\s*<!--cat:[a-zA-Z0-9_-]+-->\s*/g, "")
+          .trim();
         sec.items.push({
           id: item.id,
           name: item.name,
-          description: item.description ?? "",
+          description: cleanDescription,
           price: Number(item.price),
           image_url: item.image_url,
           available: item.available !== false,
@@ -156,9 +179,61 @@ export function buildSectionsFromData(
   return grouped;
 }
 
-export function usePublicMenu() {
-  // Deterministic initialization ensures SSR matches initial client DOM exactly
-  const [sections, setSections] = useState<MenuSectionWithItems[]>(INITIAL_DEFAULT_SECTIONS);
+/**
+ * Fetches fresh menu data directly from the Supabase database.
+ * Used by route loaders (on home and menu pages) and components.
+ */
+export async function fetchPublicMenuFromDatabase(): Promise<MenuSectionWithItems[]> {
+  if (isSupabaseConfigured) {
+    try {
+      const [catRes, itemRes] = await Promise.all([
+        supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+        supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+      ]);
+
+      const dbCategories = (catRes.data as DatabaseCategory[]) || [];
+      const dbItems = (itemRes.data as DatabaseMenuItem[]) || [];
+
+      if (dbCategories.length > 0 || dbItems.length > 0) {
+        const grouped = buildSectionsFromData(dbCategories, dbItems);
+        if (grouped.length > 0) {
+          cacheLocalMenu(dbCategories, dbItems);
+          return grouped;
+        }
+      }
+    } catch (err) {
+      console.warn("Direct Supabase public menu fetch error:", err);
+    }
+  }
+
+  const localSnapshot = getLocalMenuSnapshot();
+  if (
+    localSnapshot &&
+    Array.isArray(localSnapshot.categories) &&
+    localSnapshot.categories.length > 0
+  ) {
+    const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
+    if (grouped.length > 0) {
+      return grouped;
+    }
+  }
+
+  return INITIAL_DEFAULT_SECTIONS;
+}
+
+export function usePublicMenu(initialSections?: MenuSectionWithItems[]) {
+  // Initialize with loader/initial sections if provided, then cached local, then defaults
+  const [sections, setSections] = useState<MenuSectionWithItems[]>(() => {
+    if (initialSections && initialSections.length > 0) {
+      return initialSections;
+    }
+    const local = getLocalMenuSnapshot();
+    if (local && Array.isArray(local.categories) && local.categories.length > 0) {
+      const grouped = buildSectionsFromData(local.categories, local.items || []);
+      if (grouped.length > 0) return grouped;
+    }
+    return INITIAL_DEFAULT_SECTIONS;
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -176,7 +251,9 @@ export function usePublicMenu() {
 
         if (dbCategories.length > 0 || dbItems.length > 0) {
           const grouped = buildSectionsFromData(dbCategories, dbItems);
-          setSections(grouped);
+          if (grouped.length > 0) {
+            setSections(grouped);
+          }
           cacheLocalMenu(dbCategories, dbItems);
           setLoading(false);
           return;
@@ -194,7 +271,9 @@ export function usePublicMenu() {
       localSnapshot.categories.length > 0
     ) {
       const grouped = buildSectionsFromData(localSnapshot.categories, localSnapshot.items || []);
-      setSections(grouped);
+      if (grouped.length > 0) {
+        setSections(grouped);
+      }
       setLoading(false);
       return;
     }
@@ -202,13 +281,24 @@ export function usePublicMenu() {
     setLoading(false);
   }, []);
 
+  // Update immediately if initialSections changes (e.g. page navigation)
+  useEffect(() => {
+    if (initialSections && initialSections.length > 0) {
+      setSections(initialSections);
+    }
+  }, [initialSections]);
+
   useEffect(() => {
     // Hydrate from local cache immediately on client mount
     const local = getLocalMenuSnapshot();
     if (local && Array.isArray(local.categories) && local.categories.length > 0) {
-      setSections(buildSectionsFromData(local.categories, local.items || []));
+      const grouped = buildSectionsFromData(local.categories, local.items || []);
+      if (grouped.length > 0) {
+        setSections(grouped);
+      }
     }
 
+    // Immediately fetch fresh data from database
     fetchMenu();
 
     const handleUpdate = (e?: Event) => {
@@ -235,6 +325,7 @@ export function usePublicMenu() {
 
     window.addEventListener(MENU_ORDER_EVENT, handleUpdate as EventListener);
     window.addEventListener("storage", handleUpdate as EventListener);
+    window.addEventListener("focus", fetchMenu);
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", handleVisibilityChange);
     }
@@ -287,6 +378,7 @@ export function usePublicMenu() {
       clearInterval(pollInterval);
       window.removeEventListener(MENU_ORDER_EVENT, handleUpdate as EventListener);
       window.removeEventListener("storage", handleUpdate as EventListener);
+      window.removeEventListener("focus", fetchMenu);
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", handleVisibilityChange);
       }

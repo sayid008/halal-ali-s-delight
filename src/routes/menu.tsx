@@ -4,7 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { MenuItemRow } from "@/components/menu-item-row";
 import { restaurant } from "@/data/menu";
-import { usePublicMenu } from "@/hooks/use-public-menu";
+import { usePublicMenu, fetchPublicMenuFromDatabase } from "@/hooks/use-public-menu";
 import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 import { isShopCategory } from "@/lib/supabase";
 import { UtensilsCrossed } from "lucide-react";
@@ -24,11 +24,15 @@ export const Route = createFileRoute("/menu")({
       { name: "twitter:card", content: "summary" },
     ],
   }),
+  loader: async () => {
+    return await fetchPublicMenuFromDatabase();
+  },
   component: MenuPage,
 });
 
 function MenuPage() {
-  const { sections } = usePublicMenu();
+  const initialSections = Route.useLoaderData();
+  const { sections } = usePublicMenu(initialSections);
 
   const categoryBarRef = useRef<HTMLDivElement | null>(null);
   const isClickScrollingRef = useRef(false);
