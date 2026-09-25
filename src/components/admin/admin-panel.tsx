@@ -941,12 +941,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               </div>
             </div>
 
-            {loading ? (
-              <div className="rounded-xl border border-border/60 bg-card p-12 text-center text-xs text-muted-foreground">
-                <Loader2 className="mx-auto size-6 animate-spin text-gold mb-2" />
-                Loading menu items...
-              </div>
-            ) : filteredItems.length === 0 ? (
+            {filteredItems.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/60 bg-card p-8 text-center">
                 <UtensilsCrossed className="mx-auto size-8 text-muted-foreground/50 mb-2" />
                 <p className="text-xs font-medium text-foreground">No dishes found</p>

@@ -22,7 +22,6 @@ export const Route = createFileRoute("/admin")({
 function AdminRoute() {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
 
   // Sign-in Form state
   const [email, setEmail] = useState("");
@@ -42,8 +41,6 @@ function AdminRoute() {
         setUser(initialSession?.user ?? null);
       } catch (err) {
         console.error("Error checking session:", err);
-      } finally {
-        setAuthLoading(false);
       }
     }
 
@@ -54,7 +51,6 @@ function AdminRoute() {
     } = supabase.auth.onAuthStateChange((_event, currentSession) => {
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
-      setAuthLoading(false);
     });
 
     return () => {
@@ -116,19 +112,7 @@ function AdminRoute() {
     }
   };
 
-  // 1. Loading screen while verifying initial session
-  if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <Loader2 className="size-8 animate-spin text-gold" />
-          <p className="text-xs font-medium">Verifying authentication...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 2. Unauthenticated Screen: Login Only (Preserving Auth UI/UX)
+  // 1. Unauthenticated Screen: Login Form (Renders immediately with zero loading screen)
   if (!session || !user) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">

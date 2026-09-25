@@ -235,14 +235,6 @@ export function SpecialOfferManager() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex h-64 items-center justify-center rounded-2xl border border-border bg-card">
-        <Loader2 className="size-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4 sm:space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Header Info */}
