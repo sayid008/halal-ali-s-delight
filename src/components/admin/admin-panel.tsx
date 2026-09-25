@@ -218,55 +218,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           saveLocalMenuSnapshot(loadedCategories, loadedItems, "admin-load");
           setHasInitialLoaded(true);
           setLoading(false);
-
-          // Keep server file in sync
-          try {
-            fetch("/api/menu/store-all", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ categories: loadedCategories, items: loadedItems }),
-            }).catch(() => {
-              // ignore background sync errors
-            });
-          } catch {
-            // ignore background sync errors
-          }
-
           return;
         }
       } catch (err) {
-        console.warn("Could not fetch remote menu from Supabase:", err);
+        console.warn("Could not fetch menu from Supabase:", err);
       }
     }
 
-    // 3. Fetch from server API database (/api/menu)
-    try {
-      const res = await fetch("/api/menu", {
-        headers: { "cache-control": "no-cache" },
-      });
-      if (res.ok) {
-        const apiData = (await res.json()) as {
-          categories?: DatabaseCategory[];
-          items?: DatabaseMenuItem[];
-        };
-        if (
-          apiData.categories &&
-          Array.isArray(apiData.categories) &&
-          apiData.categories.length > 0
-        ) {
-          setCategories(apiData.categories);
-          setItems(apiData.items || []);
-          saveLocalMenuSnapshot(apiData.categories, apiData.items || [], "admin-load");
-          setHasInitialLoaded(true);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    // 4. Fallback to cached local snapshot or defaults
+    // 3. Fallback to cached local snapshot
     if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
       setCategories(cached.categories);
       setItems(cached.items || []);
@@ -492,21 +451,30 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     toast.success("Trash emptied permanently");
   }
 
-  // Save All Changes to Database
+  // Save All Changes to Database directly via Supabase change diffing
   async function handleSaveAllToDatabase() {
     try {
       const res = await batchSync.flushPending();
       if (res.success) {
-        toast.success(
-          `All ${items.length} dishes & ${categories.length} categories stored to database!`,
-        );
+        if (res.freshCategories && res.freshItems) {
+          setCategories(res.freshCategories);
+          setItems(res.freshItems);
+        }
+        if (res.hasChanges) {
+          toast.success(res.message);
+        } else {
+          toast.info("Database is already up to date — no changes detected.");
+        }
+      } else {
+        toast.error(res.message || "Failed to save changes to database.");
       }
-    } catch {
-      toast.error("Failed to save all changes to database.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save all changes to database.";
+      toast.error(msg);
     }
   }
 
-  // Save Item (Add or Edit) with optimistic update + instant local sync
+  // Save Item (Add or Edit) with direct Supabase sync and change checking
   async function handleSaveItem(data: {
     id?: string;
     name: string;
@@ -544,12 +512,18 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     setItems(newItems);
-    persistChangesToDatabase(categories, newItems, true);
+    const res = await batchSync.queueBatchUpdate(categories, newItems, { immediate: true });
+    if (res && "freshCategories" in res && res.freshCategories && res.freshItems) {
+      setCategories(res.freshCategories as DatabaseCategory[]);
+      setItems(res.freshItems as DatabaseMenuItem[]);
+    }
 
-    toast.success(isEditing ? `"${data.name}" updated!` : `"${data.name}" added to menu!`);
+    toast.success(
+      isEditing ? `"${data.name}" updated in database!` : `"${data.name}" added to database!`,
+    );
   }
 
-  // Save Category (Add or Edit)
+  // Save Category (Add or Edit) with direct Supabase sync and change checking
   async function handleSaveCategory(data: {
     id?: string;
     name: string;
@@ -595,10 +569,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     setCategories(newCats);
-    persistChangesToDatabase(newCats, newItems, true);
+    const res = await batchSync.queueBatchUpdate(newCats, newItems, { immediate: true });
+    if (res && "freshCategories" in res && res.freshCategories && res.freshItems) {
+      setCategories(res.freshCategories as DatabaseCategory[]);
+      setItems(res.freshItems as DatabaseMenuItem[]);
+    }
 
     toast.success(
-      isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
+      isEditing
+        ? `Category "${data.name}" updated in database!`
+        : `Category "${data.name}" added to database!`,
     );
   }
 
@@ -741,7 +721,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               size="sm"
               onClick={handleSaveAllToDatabase}
               disabled={batchSync.isSaving}
-              className="h-8 px-2.5 sm:px-3.5 gap-1.5 text-xs font-semibold border-gold/50 bg-gold/15 text-gold hover:bg-gold hover:text-primary transition-all shadow-xs cursor-pointer"
+              className={`h-8 px-2.5 sm:px-3.5 gap-1.5 text-xs font-semibold transition-all shadow-xs cursor-pointer ${
+                batchSync.isPending
+                  ? "border-gold bg-gold text-primary font-bold shadow-md ring-2 ring-gold/40"
+                  : "border-gold/50 bg-gold/15 text-gold hover:bg-gold hover:text-primary"
+              }`}
               title="Save all changes to database"
             >
               {batchSync.isSaving ? (
@@ -751,8 +735,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                 </>
               ) : (
                 <>
-                  <Save className="size-3.5 text-gold" />
+                  <Save className="size-3.5" />
                   <span>Save to Database</span>
+                  {batchSync.isPending && (
+                    <span
+                      className="size-2 rounded-full bg-red-500 shrink-0"
+                      title="Unsaved changes pending"
+                    />
+                  )}
                 </>
               )}
             </Button>

@@ -135,31 +135,7 @@ export function getLocalSpecialOffer(): SpecialOffer {
 export async function fetchSpecialOffer(): Promise<SpecialOffer> {
   const local = getLocalSpecialOffer();
 
-  // 1. Primary: Fetch from server API database
-  try {
-    const res = await fetch("/api/special-offer", {
-      cache: "no-store",
-      headers: { "cache-control": "no-cache" },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { offer?: SpecialOffer } & SpecialOffer;
-      const fetchedOffer = data.offer || (data.title ? (data as SpecialOffer) : null);
-      if (fetchedOffer) {
-        if (isStorageAvailable()) {
-          try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fetchedOffer));
-          } catch {
-            // ignore
-          }
-        }
-        return fetchedOffer;
-      }
-    }
-  } catch {
-    // ignore network error, fall through
-  }
-
-  // 2. Fetch from Supabase if configured
+  // 1. Fetch directly from Supabase database
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -179,7 +155,8 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
           original_price: data.original_price ? Number(data.original_price) : undefined,
           image_url: data.image_url || DEFAULT_SPECIAL_OFFER.image_url,
           slides: data.slides || local.slides || DEFAULT_SLIDES,
-          available: data.available !== false,
+          available:
+            data.is_active !== undefined ? Boolean(data.is_active) : data.available !== false,
           show_overlay: data.show_overlay !== false,
           autoplay: data.autoplay !== undefined ? data.autoplay : (local.autoplay ?? true),
           updated_at: data.updated_at,
@@ -195,38 +172,111 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
         return remoteOffer;
       }
     } catch (err) {
-      console.warn("Could not fetch remote special offer from Supabase:", err);
+      console.warn("Could not fetch special offer from Supabase:", err);
     }
   }
 
   return local;
 }
 
-export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffer> {
+export async function saveSpecialOffer(
+  offer: SpecialOffer,
+): Promise<SpecialOffer & { hasChanges?: boolean }> {
   const toSave: SpecialOffer = {
     ...offer,
     updated_at: new Date().toISOString(),
   };
 
-  // Always persist locally if storage is available
+  let hasChanges = false;
+
+  // Direct Supabase database sync with change checking
+  if (isSupabaseConfigured) {
+    try {
+      const { data: currentDbOffer } = await supabase
+        .from("special_offers")
+        .select("*")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const newIsActive = toSave.available !== false;
+      const newPrice = Number(toSave.price) || 0;
+      const newOriginalPrice = toSave.original_price ? Number(toSave.original_price) : null;
+
+      const payload: Record<string, unknown> = {
+        badge: toSave.badge || "Special Combo Offer",
+        title: toSave.title || "Special Offer",
+        description: toSave.description || "",
+        price: newPrice,
+        original_price: newOriginalPrice,
+        image_url: toSave.image_url || "",
+        slides: toSave.slides || [],
+        is_active: newIsActive,
+        updated_at: toSave.updated_at,
+      };
+
+      if (currentDbOffer) {
+        // Check for changes
+        const titleChanged = currentDbOffer.title !== payload.title;
+        const descChanged = currentDbOffer.description !== payload.description;
+        const badgeChanged = currentDbOffer.badge !== payload.badge;
+        const priceChanged = Math.abs(Number(currentDbOffer.price) - newPrice) > 0.001;
+        const origPriceChanged =
+          Math.abs(Number(currentDbOffer.original_price || 0) - Number(newOriginalPrice || 0)) >
+          0.001;
+        const imgChanged = (currentDbOffer.image_url || "") !== (payload.image_url || "");
+        const activeChanged = Boolean(currentDbOffer.is_active) !== newIsActive;
+        const slidesChanged =
+          JSON.stringify(currentDbOffer.slides || []) !== JSON.stringify(payload.slides || []);
+
+        hasChanges =
+          titleChanged ||
+          descChanged ||
+          badgeChanged ||
+          priceChanged ||
+          origPriceChanged ||
+          imgChanged ||
+          activeChanged ||
+          slidesChanged;
+
+        if (hasChanges) {
+          const { error: updErr } = await supabase
+            .from("special_offers")
+            .update(payload)
+            .eq("id", currentDbOffer.id);
+
+          if (updErr) {
+            console.warn("Special offer Supabase update notice:", updErr);
+          } else {
+            toSave.id = currentDbOffer.id;
+          }
+        } else {
+          toSave.id = currentDbOffer.id;
+        }
+      } else {
+        // Insert new special offer
+        hasChanges = true;
+        const { data: insData, error: insErr } = await supabase
+          .from("special_offers")
+          .insert(payload)
+          .select()
+          .maybeSingle();
+
+        if (!insErr && insData?.id) {
+          toSave.id = insData.id;
+        }
+      }
+    } catch (err) {
+      console.warn("Supabase special offer save notice:", err);
+    }
+  }
+
+  // Always persist locally
   if (isStorageAvailable()) {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
     } catch (err) {
       console.warn("Failed to write to localStorage:", err);
-    }
-  }
-
-  // Persist to server API database immediately
-  if (typeof fetch !== "undefined") {
-    try {
-      await fetch("/api/special-offer", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(toSave),
-      });
-    } catch (err) {
-      console.warn("Could not save to /api/special-offer:", err);
     }
   }
 
@@ -244,62 +294,7 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
     }
   }
 
-  // Background sync to Supabase if configured
-  if (isSupabaseConfigured) {
-    (async () => {
-      try {
-        const payload: Record<string, unknown> = {
-          badge: toSave.badge || "Special Combo Offer",
-          title: toSave.title || "Special Offer",
-          description: toSave.description || "",
-          price: Number(toSave.price) || 0,
-          original_price: toSave.original_price ? Number(toSave.original_price) : null,
-          image_url: toSave.image_url || "",
-          slides: toSave.slides || [],
-          available: toSave.available !== false,
-          show_overlay: toSave.show_overlay !== false,
-          autoplay: toSave.autoplay !== false,
-          updated_at: toSave.updated_at,
-        };
-
-        if (toSave.id && !toSave.id.startsWith("offer-")) {
-          payload.id = toSave.id;
-          const { error } = await supabase.from("special_offers").upsert(payload);
-          if (error) {
-            delete payload.id;
-            const { data: insData } = await supabase
-              .from("special_offers")
-              .insert(payload)
-              .select()
-              .maybeSingle();
-            if (insData?.id) {
-              toSave.id = insData.id;
-              if (isStorageAvailable()) {
-                window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-              }
-            }
-          }
-        } else {
-          const { data, error } = await supabase
-            .from("special_offers")
-            .insert(payload)
-            .select()
-            .maybeSingle();
-
-          if (!error && data?.id) {
-            toSave.id = data.id;
-            if (isStorageAvailable()) {
-              window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("Remote special offer sync notice:", err);
-      }
-    })();
-  }
-
-  return toSave;
+  return { ...toSave, hasChanges };
 }
 
 export function useSpecialOffer() {

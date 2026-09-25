@@ -26,281 +26,503 @@ export interface DatabaseResponse {
   stats?: DatabaseStats;
 }
 
+export interface DatabaseSyncDiff {
+  categoriesAdded: number;
+  categoriesUpdated: number;
+  categoriesDeleted: number;
+  itemsAdded: number;
+  itemsUpdated: number;
+  itemsDeleted: number;
+}
+
+export interface DatabaseSyncResult {
+  success: boolean;
+  hasChanges: boolean;
+  message: string;
+  itemCount: number;
+  categoryCount: number;
+  diffSummary: DatabaseSyncDiff;
+  freshCategories?: DatabaseCategory[];
+  freshItems?: DatabaseMenuItem[];
+}
+
+export function isUUID(str?: string | null): boolean {
+  return Boolean(
+    str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim()),
+  );
+}
+
+const defaultDishCategoryMap: Record<string, string> = {
+  "vegetable samosas": "starters",
+  "chicken pakora": "starters",
+  "onion bhaji": "starters",
+  "lamb seekh kebab": "grill",
+  "chicken tikka skewers": "grill",
+  "mixed grill platter": "grill",
+  "classic butter chicken": "curries",
+  "chicken tikka masala": "curries",
+  "lamb karahi": "curries",
+  "daal tarka": "curries",
+  "royal lamb biryani": "biryani",
+  "chicken biryani": "biryani",
+  "pilau rice": "biryani",
+  "peshwari naan": "breads",
+  "garlic naan": "breads",
+  "mint raita": "breads",
+  "gulab jamun": "desserts",
+  kheer: "desserts",
+  "mango lassi": "desserts",
+  "masala chai": "desserts",
+};
+
 /**
- * Fetch the full menu stored in the persistent database (/api/menu)
+ * Fetch the full menu directly from Supabase database (no API route).
  */
 export async function fetchDatabaseMenu(): Promise<DatabaseResponse | null> {
-  try {
-    const res = await fetch("/api/menu", {
-      headers: { "cache-control": "no-cache" },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json()) as DatabaseResponse;
-    return data;
-  } catch (err) {
-    console.warn("Could not fetch database menu:", err);
+  if (!isSupabaseConfigured) {
     return null;
   }
-}
-
-/**
- * Fetch current health and summary stats of the database
- */
-export async function fetchDatabaseStats(): Promise<DatabaseStats | null> {
-  try {
-    const res = await fetch("/api/menu/stats");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return data;
-  } catch (err) {
-    console.warn("Could not fetch database stats:", err);
-    return null;
-  }
-}
-
-/**
- * Fast background sync to Supabase without blocking the UI or throwing ON CONFLICT errors
- */
-export async function syncToSupabaseAsync(
-  categories: DatabaseCategory[],
-  items: DatabaseMenuItem[],
-) {
-  if (!isSupabaseConfigured) return;
 
   try {
-    const isUUID = (str?: string | null): boolean =>
-      Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
-
-    // 1. Fetch existing categories and items from Supabase to match IDs
     const [catRes, itemRes] = await Promise.all([
-      supabase.from("categories").select("id, slug, name"),
-      supabase.from("menu_items").select("id, name"),
+      supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+      supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
     ]);
 
-    const existingCats = (catRes.data as Array<{ id: string; slug: string; name: string }>) || [];
-    const existingItems = (itemRes.data as Array<{ id: string; name: string }>) || [];
+    if (catRes.error) throw catRes.error;
+    if (itemRes.error) throw itemRes.error;
 
-    const catMapBySlug = new Map(existingCats.map((c) => [c.slug, c.id]));
-    const itemMapByName = new Map(existingItems.map((i) => [i.name.toLowerCase().trim(), i.id]));
+    const categories = (catRes.data as DatabaseCategory[]) || [];
+    const items = (itemRes.data as DatabaseMenuItem[]) || [];
 
-    // 2. Prepare Category inserts vs updates
-    const catInserts: Array<Record<string, unknown>> = [];
-    const catUpdates: Array<Promise<unknown>> = [];
+    return {
+      success: true,
+      categories,
+      items,
+      count: items.length,
+      last_updated: new Date().toISOString(),
+    };
+  } catch (err) {
+    console.warn("Could not fetch database menu from Supabase:", err);
+    return null;
+  }
+}
 
-    for (const cat of categories) {
-      const payload = {
-        name: cat.name,
-        slug: cat.slug || cat.id,
-        sort_order: cat.sort_order,
-        available: cat.available !== false,
-        deleted_at: cat.deleted_at || null,
-      };
+/**
+ * Fetch current stats directly from Supabase database (no API route).
+ */
+export async function fetchDatabaseStats(): Promise<DatabaseStats | null> {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
 
-      const matchedId = cat.id && isUUID(cat.id) ? cat.id : catMapBySlug.get(cat.slug || cat.id);
+  try {
+    const [catRes, itemRes] = await Promise.all([
+      supabase.from("categories").select("id, available, deleted_at"),
+      supabase.from("menu_items").select("id, available, deleted_at"),
+    ]);
 
-      if (matchedId) {
-        catUpdates.push(
-          Promise.resolve(supabase.from("categories").update(payload).eq("id", matchedId)),
-        );
-      } else {
-        catInserts.push(payload);
-      }
-    }
+    const cats = catRes.data || [];
+    const items = itemRes.data || [];
+    const activeCats = cats.filter((c) => !c.deleted_at);
+    const activeItems = items.filter((i) => !i.deleted_at);
+    const availableItems = activeItems.filter((i) => i.available !== false);
 
-    if (catInserts.length > 0) {
-      const { data: inserted } = await supabase.from("categories").insert(catInserts).select();
-      if (inserted) {
-        (inserted as Array<{ id: string; slug: string }>).forEach((c) =>
-          catMapBySlug.set(c.slug, c.id),
-        );
-      }
-    }
-    if (catUpdates.length > 0) {
-      await Promise.allSettled(catUpdates);
-    }
+    return {
+      totalCategories: activeCats.length,
+      totalItems: activeItems.length,
+      availableItems: availableItems.length,
+      lastUpdated: new Date().toISOString(),
+      isHealthy: true,
+    };
+  } catch (err) {
+    console.warn("Could not fetch database stats from Supabase:", err);
+    return null;
+  }
+}
 
-    // Refresh category map for items foreign keys
-    const { data: refreshedCats } = await supabase.from("categories").select("id, slug, name");
-    const finalCatMap = new Map<string, string>();
-    (refreshedCats || []).forEach((c: { id: string; slug: string }) => {
-      finalCatMap.set(c.slug, c.id);
-      finalCatMap.set(c.id, c.id);
+/**
+ * Checks for changes between admin panel state and Supabase database,
+ * and updates Supabase directly according to the admin panel changes.
+ * No API endpoints are used.
+ */
+export async function checkChangesAndSyncToSupabase(
+  adminCategories: DatabaseCategory[],
+  adminItems: DatabaseMenuItem[],
+): Promise<DatabaseSyncResult> {
+  const diffSummary: DatabaseSyncDiff = {
+    categoriesAdded: 0,
+    categoriesUpdated: 0,
+    categoriesDeleted: 0,
+    itemsAdded: 0,
+    itemsUpdated: 0,
+    itemsDeleted: 0,
+  };
+
+  if (!isSupabaseConfigured) {
+    saveLocalMenuSnapshot(adminCategories, adminItems);
+    return {
+      success: true,
+      hasChanges: true,
+      message: "Saved to local cache (Supabase credentials not configured)",
+      itemCount: adminItems.length,
+      categoryCount: adminCategories.length,
+      diffSummary,
+      freshCategories: adminCategories,
+      freshItems: adminItems,
+    };
+  }
+
+  try {
+    // 1. Fetch current database state from Supabase to check for changes
+    const [dbCatRes, dbItemRes] = await Promise.all([
+      supabase.from("categories").select("*"),
+      supabase.from("menu_items").select("*"),
+    ]);
+
+    if (dbCatRes.error) throw dbCatRes.error;
+    if (dbItemRes.error) throw dbItemRes.error;
+
+    const dbCategories = (dbCatRes.data as DatabaseCategory[]) || [];
+    const dbItems = (dbItemRes.data as DatabaseMenuItem[]) || [];
+
+    // Index DB categories
+    const dbCatById = new Map<string, DatabaseCategory>();
+    const dbCatBySlug = new Map<string, DatabaseCategory>();
+    const dbCatByName = new Map<string, DatabaseCategory>();
+
+    dbCategories.forEach((cat) => {
+      if (cat.id) dbCatById.set(cat.id, cat);
+      if (cat.slug) dbCatBySlug.set(cat.slug.toLowerCase().trim(), cat);
+      if (cat.name) dbCatByName.set(cat.name.toLowerCase().trim(), cat);
     });
 
-    // 3. Prepare Item inserts vs updates
-    const itemInserts: Array<Record<string, unknown>> = [];
-    const itemUpdates: Array<Promise<unknown>> = [];
+    // 2. Diff Categories
+    const categoriesToInsert: DatabaseCategory[] = [];
+    const categoriesToUpdate: Array<{ id: string; payload: Record<string, unknown> }> = [];
 
-    const defaultDishCategoryMap: Record<string, string> = {
-      "vegetable samosas": "starters",
-      "chicken pakora": "starters",
-      "onion bhaji": "starters",
-      "lamb seekh kebab": "grill",
-      "chicken tikka skewers": "grill",
-      "mixed grill platter": "grill",
-      "classic butter chicken": "curries",
-      "chicken tikka masala": "curries",
-      "lamb karahi": "curries",
-      "daal tarka": "curries",
-      "royal lamb biryani": "biryani",
-      "chicken biryani": "biryani",
-      "pilau rice": "biryani",
-      "peshwari naan": "breads",
-      "garlic naan": "breads",
-      "mint raita": "breads",
-      "gulab jamun": "desserts",
-      kheer: "desserts",
-      "mango lassi": "desserts",
-      "masala chai": "desserts",
-    };
+    const matchedDbCatIds = new Set<string>();
 
-    for (const item of items) {
-      const matchingCat = categories.find((c) => c.id === item.category_id);
-      let catUuid: string | null = null;
-      if (matchingCat && finalCatMap.has(matchingCat.slug)) {
-        catUuid = finalCatMap.get(matchingCat.slug) || null;
-      } else if (item.category_id && finalCatMap.has(item.category_id)) {
-        catUuid = finalCatMap.get(item.category_id) || null;
-      } else if (isUUID(item.category_id)) {
-        catUuid = item.category_id;
+    for (const cat of adminCategories) {
+      let matchedDbCat: DatabaseCategory | undefined;
+
+      if (cat.id && isUUID(cat.id)) {
+        matchedDbCat = dbCatById.get(cat.id);
+      }
+      if (!matchedDbCat && cat.slug) {
+        matchedDbCat = dbCatBySlug.get(cat.slug.toLowerCase().trim());
+      }
+      if (!matchedDbCat && cat.name) {
+        matchedDbCat = dbCatByName.get(cat.name.toLowerCase().trim());
       }
 
-      if (!catUuid) {
+      if (matchedDbCat) {
+        matchedDbCatIds.add(matchedDbCat.id);
+
+        const nameChanged = matchedDbCat.name.trim() !== cat.name.trim();
+        const slugChanged = (matchedDbCat.slug || "").trim() !== (cat.slug || "").trim();
+        const sortChanged = Number(matchedDbCat.sort_order ?? 0) !== Number(cat.sort_order ?? 0);
+        const availChanged =
+          Boolean(matchedDbCat.available ?? true) !== Boolean(cat.available ?? true);
+        const deletedChanged = Boolean(matchedDbCat.deleted_at) !== Boolean(cat.deleted_at);
+
+        if (nameChanged || slugChanged || sortChanged || availChanged || deletedChanged) {
+          categoriesToUpdate.push({
+            id: matchedDbCat.id,
+            payload: {
+              name: cat.name.trim(),
+              slug: cat.slug.trim(),
+              sort_order: Number(cat.sort_order) || 0,
+              available: cat.available !== false,
+              deleted_at: cat.deleted_at || null,
+            },
+          });
+        }
+      } else {
+        categoriesToInsert.push(cat);
+      }
+    }
+
+    // Check for categories deleted/purged in admin
+    const categoriesToDelete: string[] = [];
+    for (const dbCat of dbCategories) {
+      if (!matchedDbCatIds.has(dbCat.id) && !dbCat.deleted_at) {
+        // Was removed or deleted in admin panel
+        categoriesToDelete.push(dbCat.id);
+      }
+    }
+
+    // 3. Apply Category changes to Supabase
+    if (categoriesToInsert.length > 0) {
+      const insertPayloads = categoriesToInsert.map((c) => ({
+        name: c.name.trim(),
+        slug: c.slug.trim() || c.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        sort_order: Number(c.sort_order) || 0,
+        available: c.available !== false,
+        deleted_at: c.deleted_at || null,
+      }));
+
+      const { data: insertedCats, error: insErr } = await supabase
+        .from("categories")
+        .insert(insertPayloads)
+        .select();
+
+      if (insErr) {
+        console.warn("Category insert notice:", insErr);
+      } else if (insertedCats) {
+        diffSummary.categoriesAdded = insertedCats.length;
+      }
+    }
+
+    if (categoriesToUpdate.length > 0) {
+      const updatePromises = categoriesToUpdate.map((u) =>
+        supabase.from("categories").update(u.payload).eq("id", u.id),
+      );
+      await Promise.allSettled(updatePromises);
+      diffSummary.categoriesUpdated = categoriesToUpdate.length;
+    }
+
+    if (categoriesToDelete.length > 0) {
+      const deletePromises = categoriesToDelete.map((id) =>
+        supabase
+          .from("categories")
+          .update({ deleted_at: new Date().toISOString(), available: false })
+          .eq("id", id),
+      );
+      await Promise.allSettled(deletePromises);
+      diffSummary.categoriesDeleted = categoriesToDelete.length;
+    }
+
+    // 4. Fetch refreshed categories to ensure accurate UUID map for menu items foreign keys
+    const { data: refreshedCats } = await supabase.from("categories").select("id, slug, name");
+    const catUuidMap = new Map<string, string>();
+
+    (refreshedCats || []).forEach((c: { id: string; slug: string; name: string }) => {
+      if (c.id) {
+        catUuidMap.set(c.id, c.id);
+        if (c.slug) catUuidMap.set(c.slug.toLowerCase().trim(), c.id);
+        if (c.name) catUuidMap.set(c.name.toLowerCase().trim(), c.id);
+      }
+    });
+
+    // 5. Diff Menu Items
+    const dbItemById = new Map<string, DatabaseMenuItem>();
+    const dbItemByName = new Map<string, DatabaseMenuItem>();
+
+    dbItems.forEach((item) => {
+      if (item.id) dbItemById.set(item.id, item);
+      if (item.name) dbItemByName.set(item.name.toLowerCase().trim(), item);
+    });
+
+    const itemsToInsert: Array<Record<string, unknown>> = [];
+    const itemsToUpdate: Array<{ id: string; payload: Record<string, unknown> }> = [];
+    const matchedDbItemIds = new Set<string>();
+
+    for (const item of adminItems) {
+      // Resolve target category UUID
+      let targetCatUuid: string | null = null;
+      if (item.category_id && catUuidMap.has(item.category_id)) {
+        targetCatUuid = catUuidMap.get(item.category_id) || null;
+      } else if (item.category_id && isUUID(item.category_id)) {
+        targetCatUuid = item.category_id;
+      } else {
         const fallbackSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
-        if (fallbackSlug && finalCatMap.has(fallbackSlug)) {
-          catUuid = finalCatMap.get(fallbackSlug) || null;
+        if (fallbackSlug && catUuidMap.has(fallbackSlug)) {
+          targetCatUuid = catUuidMap.get(fallbackSlug) || null;
         }
       }
 
-      const payload = {
-        name: item.name,
-        description: item.description,
+      let matchedDbItem: DatabaseMenuItem | undefined;
+      if (item.id && isUUID(item.id)) {
+        matchedDbItem = dbItemById.get(item.id);
+      }
+      if (!matchedDbItem && item.name) {
+        matchedDbItem = dbItemByName.get(item.name.toLowerCase().trim());
+      }
+
+      const itemPayload = {
+        name: item.name.trim(),
+        description: item.description?.trim() || null,
         price: Number(item.price) || 0,
-        category_id: catUuid,
-        image_url: item.image_url,
+        category_id: targetCatUuid,
+        image_url: item.image_url || null,
         available: item.available !== false,
-        sort_order: item.sort_order,
+        sort_order: Number(item.sort_order) || 0,
         deleted_at: item.deleted_at || null,
+        updated_at: new Date().toISOString(),
       };
 
-      const matchedItemId =
-        item.id && isUUID(item.id) ? item.id : itemMapByName.get(item.name.toLowerCase().trim());
+      if (matchedDbItem) {
+        matchedDbItemIds.add(matchedDbItem.id);
 
-      if (matchedItemId) {
-        itemUpdates.push(
-          Promise.resolve(supabase.from("menu_items").update(payload).eq("id", matchedItemId)),
-        );
+        const nameChanged = matchedDbItem.name.trim() !== item.name.trim();
+        const descChanged =
+          (matchedDbItem.description?.trim() || "") !== (item.description?.trim() || "");
+        const priceChanged = Math.abs(Number(matchedDbItem.price) - Number(item.price)) > 0.001;
+        const catChanged = (matchedDbItem.category_id || null) !== (targetCatUuid || null);
+        const imgChanged = (matchedDbItem.image_url || null) !== (item.image_url || null);
+        const availChanged =
+          Boolean(matchedDbItem.available ?? true) !== Boolean(item.available ?? true);
+        const sortChanged = Number(matchedDbItem.sort_order ?? 0) !== Number(item.sort_order ?? 0);
+        const deletedChanged = Boolean(matchedDbItem.deleted_at) !== Boolean(item.deleted_at);
+
+        if (
+          nameChanged ||
+          descChanged ||
+          priceChanged ||
+          catChanged ||
+          imgChanged ||
+          availChanged ||
+          sortChanged ||
+          deletedChanged
+        ) {
+          itemsToUpdate.push({
+            id: matchedDbItem.id,
+            payload: itemPayload,
+          });
+        }
       } else {
-        itemInserts.push(payload);
+        itemsToInsert.push(itemPayload);
       }
     }
 
-    if (itemInserts.length > 0) {
-      await supabase.from("menu_items").insert(itemInserts);
+    // Check for items purged/deleted in admin
+    const itemsToDelete: string[] = [];
+    for (const dbItem of dbItems) {
+      if (!matchedDbItemIds.has(dbItem.id)) {
+        itemsToDelete.push(dbItem.id);
+      }
     }
-    if (itemUpdates.length > 0) {
-      await Promise.allSettled(itemUpdates);
+
+    // 6. Apply Item changes to Supabase
+    if (itemsToInsert.length > 0) {
+      const { data: insertedItems, error: itemInsErr } = await supabase
+        .from("menu_items")
+        .insert(itemsToInsert)
+        .select();
+
+      if (itemInsErr) {
+        console.warn("Item insert notice:", itemInsErr);
+      } else if (insertedItems) {
+        diffSummary.itemsAdded = insertedItems.length;
+      }
     }
-  } catch (err) {
-    console.warn("Supabase background sync notice:", err);
+
+    if (itemsToUpdate.length > 0) {
+      const updatePromises = itemsToUpdate.map((u) =>
+        supabase.from("menu_items").update(u.payload).eq("id", u.id),
+      );
+      await Promise.allSettled(updatePromises);
+      diffSummary.itemsUpdated = itemsToUpdate.length;
+    }
+
+    if (itemsToDelete.length > 0) {
+      const deletePromises = itemsToDelete.map((id) =>
+        supabase.from("menu_items").delete().eq("id", id),
+      );
+      await Promise.allSettled(deletePromises);
+      diffSummary.itemsDeleted = itemsToDelete.length;
+    }
+
+    // 7. Fetch final up-to-date state from Supabase
+    const [finalCatRes, finalItemRes] = await Promise.all([
+      supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+      supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+    ]);
+
+    const freshCategories = (finalCatRes.data as DatabaseCategory[]) || adminCategories;
+    const freshItems = (finalItemRes.data as DatabaseMenuItem[]) || adminItems;
+
+    // Cache locally & broadcast instant updates
+    saveLocalMenuSnapshot(freshCategories, freshItems, "supabase-sync");
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent(MENU_ORDER_EVENT, {
+          detail: { type: "database_stored", categories: freshCategories, items: freshItems },
+        }),
+      );
+    }
+
+    const totalChanges =
+      diffSummary.categoriesAdded +
+      diffSummary.categoriesUpdated +
+      diffSummary.categoriesDeleted +
+      diffSummary.itemsAdded +
+      diffSummary.itemsUpdated +
+      diffSummary.itemsDeleted;
+
+    const summaryParts: string[] = [];
+    if (diffSummary.itemsUpdated > 0)
+      summaryParts.push(`${diffSummary.itemsUpdated} dishes updated`);
+    if (diffSummary.itemsAdded > 0) summaryParts.push(`${diffSummary.itemsAdded} dishes added`);
+    if (diffSummary.itemsDeleted > 0)
+      summaryParts.push(`${diffSummary.itemsDeleted} dishes removed`);
+    if (diffSummary.categoriesUpdated > 0)
+      summaryParts.push(`${diffSummary.categoriesUpdated} categories updated`);
+    if (diffSummary.categoriesAdded > 0)
+      summaryParts.push(`${diffSummary.categoriesAdded} categories added`);
+    if (diffSummary.categoriesDeleted > 0)
+      summaryParts.push(`${diffSummary.categoriesDeleted} categories removed`);
+
+    const message =
+      totalChanges > 0
+        ? `Database updated: ${summaryParts.join(", ")}`
+        : "Database is already up to date — no changes detected.";
+
+    return {
+      success: true,
+      hasChanges: totalChanges > 0,
+      message,
+      itemCount: freshItems.length,
+      categoryCount: freshCategories.length,
+      diffSummary,
+      freshCategories,
+      freshItems,
+    };
+  } catch (err: unknown) {
+    console.error("Database sync error:", err);
+    saveLocalMenuSnapshot(adminCategories, adminItems);
+    const msg = err instanceof Error ? err.message : "Failed to sync changes to Supabase";
+    return {
+      success: false,
+      hasChanges: false,
+      message: msg,
+      itemCount: adminItems.length,
+      categoryCount: adminCategories.length,
+      diffSummary,
+      freshCategories: adminCategories,
+      freshItems: adminItems,
+    };
   }
 }
 
 /**
- * Stores all menu details (categories and items) to the persistent database.
- * Syncs instantly to:
- * 1. Server database file (data/menu-db.json via /api/menu and /api/menu/store-all)
- * 2. Local storage snapshot cache
- * 3. Window & BroadcastChannel events for real-time customer menu updates
- * 4. Supabase cloud database in parallel background
+ * Stores all menu details to the Supabase database after checking for changes.
+ * Used by batchSync and admin saving actions.
  */
 export async function storeAllMenuDetailsToDatabase(
   categories: DatabaseCategory[],
   items: DatabaseMenuItem[],
-): Promise<{ success: boolean; message: string; itemCount: number; categoryCount: number }> {
-  const payload = {
-    categories,
-    items,
-    last_updated: new Date().toISOString(),
-    version: 1,
-  };
-
-  let serverSuccess = false;
-  let serverMessage = "";
-
-  // 1. Immediately persist to server database via /api/menu/store-all
-  try {
-    const res = await fetch("/api/menu/store-all", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      serverSuccess = true;
-      serverMessage = data.message || "All menu details stored successfully";
-    } else {
-      // Fallback to standard /api/menu
-      const fallbackRes = await fetch("/api/menu", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (fallbackRes.ok) {
-        serverSuccess = true;
-        serverMessage = "All menu details stored to server database";
-      }
-    }
-  } catch (err) {
-    console.warn("Failed to POST to /api/menu/store-all:", err);
-  }
-
-  // 2. Save to local storage snapshot and notify all frontend tabs immediately
-  saveLocalMenuSnapshot(categories, items);
-
-  // 3. Fast non-blocking sync to Supabase in parallel
-  if (isSupabaseConfigured) {
-    syncToSupabaseAsync(categories, items).catch((e) =>
-      console.warn("Supabase background sync:", e),
-    );
-  }
-
-  // 4. Broadcast event
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent(MENU_ORDER_EVENT, {
-        detail: { type: "database_stored", categories, items },
-      }),
-    );
-  }
-
+): Promise<{
+  success: boolean;
+  message: string;
+  itemCount: number;
+  categoryCount: number;
+  hasChanges?: boolean;
+  freshCategories?: DatabaseCategory[];
+  freshItems?: DatabaseMenuItem[];
+}> {
+  const result = await checkChangesAndSyncToSupabase(categories, items);
   return {
-    success: true,
-    message: serverSuccess
-      ? `All ${items.length} menu items and ${categories.length} categories stored to database!`
-      : `Saved ${items.length} items to database and local cache!`,
-    itemCount: items.length,
-    categoryCount: categories.length,
+    success: result.success,
+    hasChanges: result.hasChanges,
+    message: result.message,
+    itemCount: result.itemCount,
+    categoryCount: result.categoryCount,
+    freshCategories: result.freshCategories,
+    freshItems: result.freshItems,
   };
-}
-
-/**
- * Re-seed/Reset the database to default full menu
- */
-export async function resetDatabaseToDefaults(): Promise<DatabaseResponse | null> {
-  try {
-    const res = await fetch("/api/menu/reset", { method: "POST" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json()) as DatabaseResponse;
-    if (data.categories && data.items) {
-      saveLocalMenuSnapshot(data.categories, data.items);
-    }
-    return data;
-  } catch (err) {
-    console.warn("Failed to reset database menu:", err);
-    return null;
-  }
 }
 
 /**

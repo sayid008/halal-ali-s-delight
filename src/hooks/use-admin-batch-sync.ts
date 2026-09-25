@@ -50,20 +50,32 @@ export function useAdminBatchSync({
       setSyncStatus("syncing");
       try {
         const result = await storeAllMenuDetailsToDatabase(categoriesToSave, itemsToSave);
-        lastConfirmedCategoriesRef.current = categoriesToSave;
-        lastConfirmedItemsRef.current = itemsToSave;
+        if (result.freshCategories) {
+          latestCategoriesRef.current = result.freshCategories;
+          lastConfirmedCategoriesRef.current = result.freshCategories;
+        } else {
+          lastConfirmedCategoriesRef.current = categoriesToSave;
+        }
+        if (result.freshItems) {
+          latestItemsRef.current = result.freshItems;
+          lastConfirmedItemsRef.current = result.freshItems;
+        } else {
+          lastConfirmedItemsRef.current = itemsToSave;
+        }
         setSyncStatus("saved");
         setLastError(null);
         setLastSavedAt(new Date().toLocaleTimeString());
         setPendingCount(0);
         return result;
-      } catch (err) {
+      } catch (err: unknown) {
         console.warn("Database storage warning:", err);
-        setSyncStatus("saved"); // Local snapshot is still valid
+        setSyncStatus("saved");
         setLastSavedAt(new Date().toLocaleTimeString());
+        const msg = err instanceof Error ? err.message : "Error saving";
         return {
-          success: true,
-          message: "Saved locally",
+          success: false,
+          hasChanges: false,
+          message: msg,
           itemCount: itemsToSave.length,
           categoryCount: categoriesToSave.length,
         };

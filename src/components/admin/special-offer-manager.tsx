@@ -225,8 +225,12 @@ export function SpecialOfferManager() {
 
     setSaving(true);
     try {
-      await saveSpecialOffer(offer);
-      toast.success("Special Offer & all slides saved to database successfully!");
+      const res = await saveSpecialOffer(offer);
+      if (res.hasChanges) {
+        toast.success("Special Offer updated and saved to Supabase database!");
+      } else {
+        toast.info("Database is already up to date — no changes detected.");
+      }
     } catch (err) {
       toast.error("Failed to save special offer to database.");
       console.warn("Special offer save error:", err);

@@ -179,51 +179,14 @@ export function usePublicMenu() {
           setSections(grouped);
           cacheLocalMenu(dbCategories, dbItems);
           setLoading(false);
-
-          // Background sync to /api/menu so both remain in sync
-          try {
-            fetch("/api/menu/store-all", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ categories: dbCategories, items: dbItems }),
-            }).catch(() => {
-              // ignore sync error
-            });
-          } catch {
-            // ignore sync error
-          }
-
           return;
         }
       } catch (err) {
-        console.warn("Supabase fetch fallback:", err);
+        console.warn("Supabase public menu fetch notice:", err);
       }
     }
 
-    // 2. Fetch from server API database (/api/menu)
-    try {
-      const res = await fetch("/api/menu", {
-        cache: "no-store",
-        headers: { "cache-control": "no-cache" },
-      });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          categories?: DatabaseCategory[];
-          items?: DatabaseMenuItem[];
-        };
-        if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
-          const grouped = buildSectionsFromData(data.categories, data.items || []);
-          setSections(grouped);
-          cacheLocalMenu(data.categories, data.items || []);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {
-      // ignore network error, proceed to next source
-    }
-
-    // 3. Fallback to cached local snapshot of database
+    // 2. Fallback to cached local snapshot of database
     const localSnapshot = getLocalMenuSnapshot();
     if (
       localSnapshot &&
