@@ -4,9 +4,8 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { MenuItemRow } from "@/components/menu-item-row";
 import { restaurant } from "@/data/menu";
-import { useWebsitePreloader } from "@/hooks/use-website-preloader";
+import { usePublicMenu } from "@/hooks/use-public-menu";
 import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
-import { DatabaseLoadingScreen } from "@/components/database-loading-screen";
 import { isShopCategory } from "@/lib/supabase";
 import { UtensilsCrossed } from "lucide-react";
 
@@ -29,7 +28,7 @@ export const Route = createFileRoute("/menu")({
 });
 
 function MenuPage() {
-  const { sections, isReady, loadingStatus } = useWebsitePreloader();
+  const { sections } = usePublicMenu();
 
   const categoryBarRef = useRef<HTMLDivElement | null>(null);
   const isClickScrollingRef = useRef(false);
@@ -156,10 +155,6 @@ function MenuPage() {
     },
     [centerActivePill],
   );
-
-  if (!isReady) {
-    return <DatabaseLoadingScreen status={loadingStatus} isReady={isReady} />;
-  }
 
   return (
     <div className="min-h-screen bg-background text-primary animate-in fade-in-0 duration-300">

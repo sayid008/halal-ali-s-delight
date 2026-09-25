@@ -176,7 +176,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   );
 
   const loadData = useCallback(async () => {
-    // 1. If we have a local cache, show it immediately so there's zero initial wait
+    // 1. Instant optimistic hydrate from local cache
     const cached = getLocalMenuSnapshot();
     if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
       setCategories(cached.categories);
@@ -185,7 +185,61 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       setLoading(true);
     }
 
-    // 2. Fetch fresh data from server API database (/api/menu)
+    // 2. If Supabase is configured, fetch live from Supabase
+    if (isSupabaseConfigured) {
+      try {
+        const timeoutPromise = new Promise<{
+          data: null;
+          error: { message: string; code: string };
+        }>((resolve) =>
+          setTimeout(
+            () => resolve({ data: null, error: { message: "Request timeout", code: "TIMEOUT" } }),
+            4000,
+          ),
+        );
+
+        const [catRes, itemRes] = await Promise.all([
+          Promise.race([
+            supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+            timeoutPromise,
+          ]),
+          Promise.race([
+            supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+            timeoutPromise,
+          ]),
+        ]);
+
+        const loadedCategories = (catRes.data as DatabaseCategory[]) || [];
+        const loadedItems = (itemRes.data as DatabaseMenuItem[]) || [];
+
+        if (loadedCategories.length > 0 || loadedItems.length > 0) {
+          setCategories(loadedCategories);
+          setItems(loadedItems);
+          saveLocalMenuSnapshot(loadedCategories, loadedItems, "admin-load");
+          setHasInitialLoaded(true);
+          setLoading(false);
+
+          // Keep server file in sync
+          try {
+            fetch("/api/menu/store-all", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ categories: loadedCategories, items: loadedItems }),
+            }).catch(() => {
+              // ignore background sync errors
+            });
+          } catch {
+            // ignore background sync errors
+          }
+
+          return;
+        }
+      } catch (err) {
+        console.warn("Could not fetch remote menu from Supabase:", err);
+      }
+    }
+
+    // 3. Fetch from server API database (/api/menu)
     try {
       const res = await fetch("/api/menu", {
         headers: { "cache-control": "no-cache" },
@@ -210,46 +264,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       }
     } catch {
       // ignore
-    }
-
-    // 3. Fetch from Supabase live database if configured
-    if (isSupabaseConfigured) {
-      try {
-        const timeoutPromise = new Promise<{
-          data: null;
-          error: { message: string; code: string };
-        }>((resolve) =>
-          setTimeout(
-            () => resolve({ data: null, error: { message: "Request timeout", code: "TIMEOUT" } }),
-            3000,
-          ),
-        );
-
-        const [catRes, itemRes] = await Promise.all([
-          Promise.race([
-            supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-            timeoutPromise,
-          ]),
-          Promise.race([
-            supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
-            timeoutPromise,
-          ]),
-        ]);
-
-        const loadedCategories = (catRes.data as DatabaseCategory[]) || [];
-        const loadedItems = (itemRes.data as DatabaseMenuItem[]) || [];
-
-        if (loadedCategories.length > 0 || loadedItems.length > 0) {
-          setCategories(loadedCategories);
-          setItems(loadedItems);
-          saveLocalMenuSnapshot(loadedCategories, loadedItems, "admin-load");
-          setHasInitialLoaded(true);
-          setLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.warn("Could not fetch remote menu from Supabase:", err);
-      }
     }
 
     // 4. Fallback to cached local snapshot or defaults

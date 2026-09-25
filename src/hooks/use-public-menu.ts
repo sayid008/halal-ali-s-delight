@@ -8,8 +8,27 @@ import {
   isShopCategory,
 } from "@/lib/supabase";
 import { getLocalMenuSnapshot, cacheLocalMenu, MENU_ORDER_EVENT } from "@/lib/menu-order";
+import { menuSections } from "@/data/menu";
 
-function buildSectionsFromData(
+// Deterministic default menu for both Server-Side Rendering (SSR) and initial Client Hydration
+const INITIAL_DEFAULT_SECTIONS: MenuSectionWithItems[] = menuSections.map((sec) => ({
+  id: sec.id,
+  title: sec.title,
+  items: sec.items.map((item, idx) => ({
+    id: `default-${sec.id}-${idx}`,
+    name: item.name,
+    description: item.description,
+    price:
+      typeof item.price === "number"
+        ? item.price
+        : Number(String(item.price).replace(/[^\d.]/g, "")) || 0,
+    image_url: item.image ?? null,
+    available: true,
+    sort_order: (idx + 1) * 10,
+  })),
+}));
+
+export function buildSectionsFromData(
   rawCategories: DatabaseCategory[],
   rawItems: DatabaseMenuItem[],
 ): MenuSectionWithItems[] {
@@ -138,12 +157,50 @@ function buildSectionsFromData(
 }
 
 export function usePublicMenu() {
-  const [sections, setSections] = useState<MenuSectionWithItems[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Deterministic initialization ensures SSR matches initial client DOM exactly
+  const [sections, setSections] = useState<MenuSectionWithItems[]>(INITIAL_DEFAULT_SECTIONS);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {
-    // 1. Primary: Fetch from server API database (/api/menu)
+    // 1. If Supabase is configured, fetch live from Supabase first
+    if (isSupabaseConfigured) {
+      try {
+        const [catRes, itemRes] = await Promise.all([
+          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+          supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+        ]);
+
+        const dbCategories = (catRes.data as DatabaseCategory[]) || [];
+        const dbItems = (itemRes.data as DatabaseMenuItem[]) || [];
+
+        if (dbCategories.length > 0 || dbItems.length > 0) {
+          const grouped = buildSectionsFromData(dbCategories, dbItems);
+          setSections(grouped);
+          cacheLocalMenu(dbCategories, dbItems);
+          setLoading(false);
+
+          // Background sync to /api/menu so both remain in sync
+          try {
+            fetch("/api/menu/store-all", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ categories: dbCategories, items: dbItems }),
+            }).catch(() => {
+              // ignore sync error
+            });
+          } catch {
+            // ignore sync error
+          }
+
+          return;
+        }
+      } catch (err) {
+        console.warn("Supabase fetch fallback:", err);
+      }
+    }
+
+    // 2. Fetch from server API database (/api/menu)
     try {
       const res = await fetch("/api/menu", {
         cache: "no-store",
@@ -166,29 +223,6 @@ export function usePublicMenu() {
       // ignore network error, proceed to next source
     }
 
-    // 2. Fetch from Supabase database if configured
-    if (isSupabaseConfigured) {
-      try {
-        const [catRes, itemRes] = await Promise.all([
-          supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-          supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
-        ]);
-
-        const dbCategories = (catRes.data as DatabaseCategory[]) || [];
-        const dbItems = (itemRes.data as DatabaseMenuItem[]) || [];
-
-        if (dbCategories.length > 0 || dbItems.length > 0) {
-          const grouped = buildSectionsFromData(dbCategories, dbItems);
-          setSections(grouped);
-          cacheLocalMenu(dbCategories, dbItems);
-          setLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.warn("Error fetching menu from Supabase:", err);
-      }
-    }
-
     // 3. Fallback to cached local snapshot of database
     const localSnapshot = getLocalMenuSnapshot();
     if (
@@ -202,17 +236,14 @@ export function usePublicMenu() {
       return;
     }
 
-    setSections([]);
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    // 1. Immediately hydrate from local database snapshot on mount
+    // Hydrate from local cache immediately on client mount
     const local = getLocalMenuSnapshot();
     if (local && Array.isArray(local.categories) && local.categories.length > 0) {
-      const grouped = buildSectionsFromData(local.categories, local.items || []);
-      setSections(grouped);
-      setLoading(false);
+      setSections(buildSectionsFromData(local.categories, local.items || []));
     }
 
     fetchMenu();
@@ -287,7 +318,7 @@ export function usePublicMenu() {
 
     const pollInterval = setInterval(() => {
       fetchMenu();
-    }, 4000);
+    }, 3000);
 
     return () => {
       clearInterval(pollInterval);

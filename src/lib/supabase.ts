@@ -18,10 +18,10 @@ const rawKey =
 
 export const isSupabaseConfigured = Boolean(
   rawUrl &&
-    rawKey &&
-    rawUrl.startsWith("http") &&
-    !rawUrl.includes("placeholder-project") &&
-    !rawKey.includes("placeholder"),
+  rawKey &&
+  rawUrl.startsWith("http") &&
+  !rawUrl.includes("placeholder-project") &&
+  !rawKey.includes("placeholder"),
 );
 
 const supabaseUrl = isSupabaseConfigured ? rawUrl : "https://placeholder-project.supabase.co";

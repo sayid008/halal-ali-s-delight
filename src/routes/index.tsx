@@ -4,8 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 import { restaurant } from "@/data/menu";
-import { useWebsitePreloader } from "@/hooks/use-website-preloader";
-import { DatabaseLoadingScreen } from "@/components/database-loading-screen";
+import { usePublicMenu } from "@/hooks/use-public-menu";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
 const description =
@@ -26,13 +25,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const { sections, isReady, loadingStatus } = useWebsitePreloader();
+  const { sections } = usePublicMenu();
 
-  if (!isReady) {
-    return <DatabaseLoadingScreen status={loadingStatus} isReady={isReady} />;
-  }
-
-  // ONLY display categories and items present in the persistent database
+  // Seamless immediate render of categories and items
   const displaySections = sections.map((s) => ({
     id: s.id,
     title: s.title,
