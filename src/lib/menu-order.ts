@@ -16,8 +16,14 @@ function isStorageAvailable(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
+function isUUID(str?: string | null): boolean {
+  return Boolean(
+    str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str),
+  );
+}
+
 /**
- * Cache categories and items directly in local storage without triggering POST requests or loops.
+ * Cache categories and items directly in local storage.
  */
 export function cacheLocalMenu(categories: DatabaseCategory[], items: DatabaseMenuItem[]): void {
   if (isStorageAvailable()) {
@@ -34,19 +40,9 @@ export function saveLocalMenuSnapshot(
   categories: DatabaseCategory[],
   items: DatabaseMenuItem[],
   source: string = "admin-panel",
-  options?: { skipServerFetch?: boolean },
+  _options?: { skipServerFetch?: boolean },
 ): void {
   cacheLocalMenu(categories, items);
-
-  if (!options?.skipServerFetch && typeof fetch !== "undefined") {
-    fetch("/api/menu", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ categories, items }),
-    }).catch(() => {
-      // ignore network errors
-    });
-  }
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(
@@ -67,25 +63,13 @@ export function saveLocalMenuSnapshot(
 }
 
 /**
- * Explicit helper to save any changes made in admin panel to persistent database & trigger UI updates
+ * Helper to save changes made in admin panel locally & trigger UI updates
  */
 export async function saveAdminMenuChangesToDatabase(
   categories: DatabaseCategory[],
   items: DatabaseMenuItem[],
 ): Promise<boolean> {
   saveLocalMenuSnapshot(categories, items);
-  if (typeof fetch !== "undefined") {
-    try {
-      const res = await fetch("/api/menu", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ categories, items }),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
   return true;
 }
 
@@ -148,7 +132,7 @@ export function getLocalItemOrderMap(): Record<string, number> {
 }
 
 /**
- * Persist category order locally and remotely to Supabase.
+ * Persist category order locally.
  */
 export async function persistCategoryOrder(reorderedCategories: DatabaseCategory[]): Promise<void> {
   const updated = reorderedCategories.map((cat, idx) => ({
@@ -156,7 +140,6 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
     sort_order: idx + 1,
   }));
 
-  // 1. Save locally in category order key and snapshot cache
   if (isStorageAvailable()) {
     try {
       const orderIdentifiers = updated.map((c) => c.slug || c.id);
@@ -168,7 +151,6 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
     }
   }
 
-  // 2. Dispatch custom event for real-time customer website updates
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent(MENU_ORDER_EVENT, {
@@ -177,50 +159,39 @@ export async function persistCategoryOrder(reorderedCategories: DatabaseCategory
     );
   }
 
-  // 3. Persist to Supabase if configured
+  // Persist to Supabase if configured
   if (isSupabaseConfigured) {
-    try {
-      const isUUID = (str?: string | null) =>
-        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+    (async () => {
+      try {
+        for (const cat of updated) {
+          const payload = {
+            name: cat.name,
+            slug: cat.slug || cat.id,
+            sort_order: cat.sort_order,
+            available: cat.available !== false,
+          };
 
-      for (const cat of updated) {
-        const payload = {
-          name: cat.name,
-          slug: cat.slug || cat.id,
-          sort_order: cat.sort_order,
-          available: cat.available !== false,
-        };
-
-        if (cat.id && isUUID(cat.id)) {
-          const { data: res } = await supabase
-            .from("categories")
-            .update({ sort_order: cat.sort_order })
-            .eq("id", cat.id)
-            .select();
-
-          if (!res || res.length === 0) {
-            await supabase.from("categories").upsert({ ...payload, id: cat.id });
-          }
-        } else if (cat.slug) {
-          const { data: res } = await supabase
-            .from("categories")
-            .update({ sort_order: cat.sort_order })
-            .eq("slug", cat.slug)
-            .select();
-
-          if (!res || res.length === 0) {
-            await supabase.from("categories").upsert(payload, { onConflict: "slug" });
+          if (cat.id && isUUID(cat.id)) {
+            await supabase
+              .from("categories")
+              .update({ sort_order: cat.sort_order })
+              .eq("id", cat.id);
+          } else if (cat.slug) {
+            await supabase
+              .from("categories")
+              .update({ sort_order: cat.sort_order })
+              .eq("slug", cat.slug);
           }
         }
+      } catch (err) {
+        console.warn("Supabase category sort order sync error:", err);
       }
-    } catch (err) {
-      console.warn("Supabase category sort order update error:", err);
-    }
+    })();
   }
 }
 
 /**
- * Persist menu item order locally and remotely to Supabase.
+ * Persist menu item order locally.
  */
 export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Promise<void> {
   const updated = reorderedItems.map((item, idx) => ({
@@ -228,7 +199,6 @@ export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Prom
     sort_order: idx + 1,
   }));
 
-  // 1. Save locally in item order map and snapshot cache
   if (isStorageAvailable()) {
     try {
       const orderMap: Record<string, number> = {};
@@ -246,7 +216,6 @@ export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Prom
     }
   }
 
-  // 2. Dispatch custom event for real-time customer website updates
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent(MENU_ORDER_EVENT, {
@@ -255,65 +224,32 @@ export async function persistItemOrder(reorderedItems: DatabaseMenuItem[]): Prom
     );
   }
 
-  // 3. Persist to Supabase if configured
+  // Persist to Supabase if configured
   if (isSupabaseConfigured) {
-    try {
-      const isUUID = (str?: string | null) =>
-        Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
-
-      const snapshot = getLocalMenuSnapshot();
-
-      for (const item of updated) {
-        let dbCatId = item.category_id;
-        if (dbCatId && !isUUID(dbCatId) && snapshot?.categories) {
-          const matched = snapshot.categories.find(
-            (c) => c.id === dbCatId || c.slug === dbCatId || c.name === dbCatId,
-          );
-          if (matched && isUUID(matched.id)) {
-            dbCatId = matched.id;
+    (async () => {
+      try {
+        for (const item of updated) {
+          if (item.id && isUUID(item.id)) {
+            await supabase
+              .from("menu_items")
+              .update({ sort_order: item.sort_order })
+              .eq("id", item.id);
+          } else if (item.name) {
+            await supabase
+              .from("menu_items")
+              .update({ sort_order: item.sort_order })
+              .eq("name", item.name);
           }
         }
-
-        const payload = {
-          name: item.name,
-          description: item.description,
-          price: Number(item.price) || 0,
-          category_id: dbCatId && isUUID(dbCatId) ? dbCatId : null,
-          image_url: item.image_url,
-          available: item.available !== false,
-          sort_order: item.sort_order,
-        };
-
-        if (item.id && isUUID(item.id)) {
-          const { data: res } = await supabase
-            .from("menu_items")
-            .update({ sort_order: item.sort_order })
-            .eq("id", item.id)
-            .select();
-
-          if (!res || res.length === 0) {
-            await supabase.from("menu_items").upsert({ ...payload, id: item.id });
-          }
-        } else {
-          const { data: res } = await supabase
-            .from("menu_items")
-            .update({ sort_order: item.sort_order })
-            .eq("name", item.name)
-            .select();
-
-          if (!res || res.length === 0) {
-            await supabase.from("menu_items").upsert(payload, { onConflict: "name" });
-          }
-        }
+      } catch (err) {
+        console.warn("Supabase item sort order sync error:", err);
       }
-    } catch (err) {
-      console.warn("Supabase menu item sort order update error:", err);
-    }
+    })();
   }
 }
 
 /**
- * Apply local order to static fallback sections if Supabase is offline.
+ * Apply local order to static fallback sections if needed.
  */
 export function applyOrderToStaticSections(sections: MenuSection[]): MenuSection[] {
   const catOrder = getLocalCategoryOrder();

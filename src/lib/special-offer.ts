@@ -135,7 +135,7 @@ export function getLocalSpecialOffer(): SpecialOffer {
 export async function fetchSpecialOffer(): Promise<SpecialOffer> {
   const local = getLocalSpecialOffer();
 
-  // 1. Fetch from Supabase first if configured
+  // 1. Fetch from Supabase if configured
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -161,12 +161,11 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
           updated_at: data.updated_at,
         };
 
-        // Cache locally
         if (isStorageAvailable()) {
           try {
             window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteOffer));
-          } catch (e) {
-            console.warn("Failed to cache remote offer in localStorage:", e);
+          } catch {
+            // ignore
           }
         }
         return remoteOffer;
@@ -214,7 +213,7 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
     }
   }
 
-  // Persist to server API database
+  // Persist to server API database in background if available
   if (typeof fetch !== "undefined") {
     fetch("/api/special-offer", {
       method: "POST",
@@ -239,58 +238,59 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
     }
   }
 
-  // Persist to Supabase if configured
+  // Background sync to Supabase if configured
   if (isSupabaseConfigured) {
-    try {
-      const payload: Record<string, unknown> = {
-        badge: toSave.badge || "Special Combo Offer",
-        title: toSave.title || "Special Offer",
-        description: toSave.description || "",
-        price: Number(toSave.price) || 0,
-        original_price: toSave.original_price ? Number(toSave.original_price) : null,
-        image_url: toSave.image_url || "",
-        slides: toSave.slides || [],
-        available: toSave.available !== false,
-        show_overlay: toSave.show_overlay !== false,
-        autoplay: toSave.autoplay !== false,
-        updated_at: toSave.updated_at,
-      };
+    (async () => {
+      try {
+        const payload: Record<string, unknown> = {
+          badge: toSave.badge || "Special Combo Offer",
+          title: toSave.title || "Special Offer",
+          description: toSave.description || "",
+          price: Number(toSave.price) || 0,
+          original_price: toSave.original_price ? Number(toSave.original_price) : null,
+          image_url: toSave.image_url || "",
+          slides: toSave.slides || [],
+          available: toSave.available !== false,
+          show_overlay: toSave.show_overlay !== false,
+          autoplay: toSave.autoplay !== false,
+          updated_at: toSave.updated_at,
+        };
 
-      if (toSave.id && !toSave.id.startsWith("offer-")) {
-        payload.id = toSave.id;
-        const { error } = await supabase.from("special_offers").upsert(payload);
-        if (error) {
-          console.warn("Supabase upsert error in special_offers, falling back to insert:", error);
-          delete payload.id;
-          const { data: insData } = await supabase
+        if (toSave.id && !toSave.id.startsWith("offer-")) {
+          payload.id = toSave.id;
+          const { error } = await supabase.from("special_offers").upsert(payload);
+          if (error) {
+            delete payload.id;
+            const { data: insData } = await supabase
+              .from("special_offers")
+              .insert(payload)
+              .select()
+              .maybeSingle();
+            if (insData?.id) {
+              toSave.id = insData.id;
+              if (isStorageAvailable()) {
+                window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+              }
+            }
+          }
+        } else {
+          const { data, error } = await supabase
             .from("special_offers")
             .insert(payload)
             .select()
             .maybeSingle();
-          if (insData?.id) {
-            toSave.id = insData.id;
+
+          if (!error && data?.id) {
+            toSave.id = data.id;
             if (isStorageAvailable()) {
               window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
             }
           }
         }
-      } else {
-        const { data, error } = await supabase
-          .from("special_offers")
-          .insert(payload)
-          .select()
-          .maybeSingle();
-
-        if (!error && data?.id) {
-          toSave.id = data.id;
-          if (isStorageAvailable()) {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-          }
-        }
+      } catch (err) {
+        console.warn("Remote special offer sync notice:", err);
       }
-    } catch (err) {
-      console.warn("Remote special offer save attempt:", err);
-    }
+    })();
   }
 
   return toSave;

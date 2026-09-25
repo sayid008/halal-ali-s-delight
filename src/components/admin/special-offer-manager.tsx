@@ -215,7 +215,7 @@ export function SpecialOfferManager() {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const currentSlides = getOfferSlides(offer);
     const hasEmptyTitle = currentSlides.some((s) => !s.title.trim());
     if (hasEmptyTitle) {
@@ -224,11 +224,15 @@ export function SpecialOfferManager() {
     }
 
     setSaving(true);
-    applyAndSaveOffer(offer);
-    setTimeout(() => {
+    try {
+      await saveSpecialOffer(offer);
+      toast.success("Special Offer & all slides saved to database successfully!");
+    } catch (err) {
+      toast.error("Failed to save special offer to database.");
+      console.warn("Special offer save error:", err);
+    } finally {
       setSaving(false);
-      toast.success("Special Offer banner & all slides saved successfully!");
-    }, 300);
+    }
   }
 
   if (loading) {

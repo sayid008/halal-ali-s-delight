@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   RotateCcw,
   Trash2,
-  AlertTriangle,
   Clock,
   ShieldCheck,
   ImageIcon,

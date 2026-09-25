@@ -1,23 +1,27 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   supabase,
   isSupabaseConfigured,
   formatPrice,
+  isShopCategory,
   type DatabaseMenuItem,
   type DatabaseCategory,
   type AdminUserSession,
 } from "@/lib/supabase";
 import {
-  saveLocalMenuSnapshot,
-  getLocalMenuSnapshot,
   persistCategoryOrder,
   persistItemOrder,
+  saveLocalMenuSnapshot,
+  getLocalMenuSnapshot,
+  MENU_ORDER_EVENT,
 } from "@/lib/menu-order";
 import { MenuItemDialog } from "./menu-item-dialog";
 import { CategoryDialog } from "./category-dialog";
 import { SpecialOfferManager } from "./special-offer-manager";
 import { TrashManager } from "./trash-manager";
+import { getDaysRemaining } from "@/lib/trash";
+import { useAdminBatchSync } from "@/hooks/use-admin-batch-sync";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +41,8 @@ import {
   ChevronDown,
   Loader2,
   Sparkles,
+  Save,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { menuSections as homeSections } from "@/data/menu";
@@ -90,7 +96,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
     return defaultItems;
   });
-
   const [categories, setCategories] = useState<DatabaseCategory[]>(() => {
     const cached = getLocalMenuSnapshot();
     if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
@@ -98,8 +103,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
     return defaultCategories;
   });
-
-  const [loading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
 
   // Active Tab with URL synchronization
@@ -140,7 +144,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState("");
-  const [itemCategoryFilter, setItemCategoryFilter] = useState<string>("all");
 
   // Dialog States
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
@@ -149,70 +152,186 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<DatabaseCategory | null>(null);
 
-  const persistChanges = useCallback(
-    (updatedCats: DatabaseCategory[], updatedItems: DatabaseMenuItem[]) => {
-      saveLocalMenuSnapshot(updatedCats, updatedItems, "admin-panel");
-      persistCategoryOrder(updatedCats).catch((e) =>
-        console.warn("Category order save notice:", e),
-      );
-      persistItemOrder(updatedItems).catch((e) => console.warn("Item order save notice:", e));
+  const [hasInitialLoaded, setHasInitialLoaded] = useState(false);
+
+  const batchSync = useAdminBatchSync({
+    initialCategories: categories,
+    initialItems: items,
+    onRollback: (rolledCats, rolledItems) => {
+      setCategories(rolledCats);
+      setItems(rolledItems);
     },
-    [],
+    debounceMs: 300,
+  });
+
+  const persistChangesToDatabase = useCallback(
+    (
+      updatedCats: DatabaseCategory[],
+      updatedItems: DatabaseMenuItem[],
+      immediate: boolean = false,
+    ) => {
+      batchSync.queueBatchUpdate(updatedCats, updatedItems, { immediate });
+    },
+    [batchSync],
   );
 
-  useEffect(() => {
-    let mounted = true;
+  const loadData = useCallback(async () => {
+    // 1. If we have a local cache, show it immediately so there's zero initial wait
+    const cached = getLocalMenuSnapshot();
+    if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+      setCategories(cached.categories);
+      setItems(cached.items || []);
+    } else {
+      setLoading(true);
+    }
 
-    async function loadData() {
-      if (isSupabaseConfigured) {
-        try {
-          const [catRes, itemRes] = await Promise.all([
-            supabase.from("categories").select("*").order("sort_order", { ascending: true }),
-            supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
-          ]);
-          if (mounted) {
-            if (catRes.data && Array.isArray(catRes.data) && catRes.data.length > 0) {
-              setCategories(catRes.data as DatabaseCategory[]);
-            }
-            if (itemRes.data && Array.isArray(itemRes.data) && itemRes.data.length > 0) {
-              setItems(itemRes.data as DatabaseMenuItem[]);
-            }
-            if (catRes.data && catRes.data.length > 0) {
-              return;
-            }
-          }
-        } catch (err) {
-          console.warn("Could not fetch database menu from Supabase:", err);
-        }
-      }
-
+    // 2. Fetch fresh data from Supabase live database if configured
+    if (isSupabaseConfigured) {
       try {
-        const res = await fetch("/api/menu");
-        if (res.ok) {
-          const data = (await res.json()) as {
-            categories?: DatabaseCategory[];
-            items?: DatabaseMenuItem[];
-          };
-          if (mounted) {
-            if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
-              setCategories(data.categories);
-            }
-            if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-              setItems(data.items);
-            }
-          }
+        const timeoutPromise = new Promise<{
+          data: null;
+          error: { message: string; code: string };
+        }>((resolve) =>
+          setTimeout(
+            () => resolve({ data: null, error: { message: "Request timeout", code: "TIMEOUT" } }),
+            3000,
+          ),
+        );
+
+        const [catRes, itemRes] = await Promise.all([
+          Promise.race([
+            supabase.from("categories").select("*").order("sort_order", { ascending: true }),
+            timeoutPromise,
+          ]),
+          Promise.race([
+            supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+            timeoutPromise,
+          ]),
+        ]);
+
+        const loadedCategories = (catRes.data as DatabaseCategory[]) || [];
+        const loadedItems = (itemRes.data as DatabaseMenuItem[]) || [];
+
+        if (loadedCategories.length > 0 || loadedItems.length > 0) {
+          setCategories(loadedCategories);
+          setItems(loadedItems);
+          saveLocalMenuSnapshot(loadedCategories, loadedItems, "admin-load");
+          setHasInitialLoaded(true);
+          setLoading(false);
+          return;
         }
       } catch (err) {
-        console.warn("Could not fetch database menu:", err);
+        console.warn("Could not fetch remote menu from Supabase:", err);
       }
     }
 
+    // 3. Fetch from server API database (/api/menu)
+    try {
+      const res = await fetch("/api/menu", {
+        headers: { "cache-control": "no-cache" },
+      });
+      if (res.ok) {
+        const apiData = (await res.json()) as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (
+          apiData.categories &&
+          Array.isArray(apiData.categories) &&
+          apiData.categories.length > 0
+        ) {
+          setCategories(apiData.categories);
+          setItems(apiData.items || []);
+          saveLocalMenuSnapshot(apiData.categories, apiData.items || [], "admin-load");
+          setHasInitialLoaded(true);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 4. Fallback to cached local snapshot or defaults
+    if (cached && Array.isArray(cached.categories) && cached.categories.length > 0) {
+      setCategories(cached.categories);
+      setItems(cached.items || []);
+    } else {
+      setCategories(defaultCategories);
+      setItems(defaultItems);
+      saveLocalMenuSnapshot(defaultCategories, defaultItems);
+    }
+
+    setHasInitialLoaded(true);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
     loadData();
 
-    return () => {
-      mounted = false;
+    const handleLocalUpdate = (e?: Event) => {
+      if (e && "detail" in e && e.detail) {
+        const detail = (e as CustomEvent).detail as {
+          source?: string;
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        // If event came from current admin panel, ignore to avoid overwriting active state
+        if (detail.source === "admin-panel") {
+          return;
+        }
+        if (detail.categories && Array.isArray(detail.categories)) {
+          setCategories(detail.categories);
+        }
+        if (detail.items && Array.isArray(detail.items)) {
+          setItems(detail.items);
+        }
+      }
     };
-  }, []);
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        loadData();
+      }
+    };
+
+    window.addEventListener(MENU_ORDER_EVENT, handleLocalUpdate as EventListener);
+    window.addEventListener("storage", handleLocalUpdate as EventListener);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        bc = new BroadcastChannel("halal_ali_menu_channel");
+        bc.onmessage = (msgEvent) => {
+          if (msgEvent.data && typeof msgEvent.data === "object") {
+            if (msgEvent.data.source === "admin-panel") return;
+            if (msgEvent.data.categories && Array.isArray(msgEvent.data.categories)) {
+              setCategories(msgEvent.data.categories);
+            }
+            if (msgEvent.data.items && Array.isArray(msgEvent.data.items)) {
+              setItems(msgEvent.data.items);
+            }
+          }
+        };
+      } catch {
+        // ignore channel errors
+      }
+    }
+
+    return () => {
+      window.removeEventListener(MENU_ORDER_EVENT, handleLocalUpdate as EventListener);
+      window.removeEventListener("storage", handleLocalUpdate as EventListener);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+      if (bc) {
+        bc.close();
+      }
+    };
+  }, [loadData]);
 
   // Separate Active vs Trashed items
   const activeItems = useMemo(() => items.filter((i) => !i.deleted_at), [items]);
@@ -221,11 +340,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   const trashedCategories = useMemo(() => categories.filter((c) => !!c.deleted_at), [categories]);
 
   // Toggle Dish Visibility (Active vs Inactive)
-  function handleToggleItemVisibility(item: DatabaseMenuItem) {
+  async function handleToggleItemVisibility(item: DatabaseMenuItem) {
     const nextVal = item.available === false ? true : false;
     const updatedItems = items.map((i) => (i.id === item.id ? { ...i, available: nextVal } : i));
     setItems(updatedItems);
-    persistChanges(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems, true);
 
     toast.success(
       nextVal
@@ -235,11 +354,11 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   }
 
   // Toggle Category Visibility (Active vs Inactive)
-  function handleToggleCategoryVisibility(cat: DatabaseCategory) {
+  async function handleToggleCategoryVisibility(cat: DatabaseCategory) {
     const nextVal = cat.available === false ? true : false;
     const updatedCats = categories.map((c) => (c.id === cat.id ? { ...c, available: nextVal } : c));
     setCategories(updatedCats);
-    persistChanges(updatedCats, items);
+    persistChangesToDatabase(updatedCats, items, true);
 
     toast.success(
       nextVal
@@ -249,7 +368,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   }
 
   // Move Item to Trash (Soft Delete for 30 days)
-  function handleTrashItem(item: DatabaseMenuItem) {
+  async function handleTrashItem(item: DatabaseMenuItem) {
     if (
       !window.confirm(
         `Move "${item.name}" to Trash? It will be hidden from website visitors and kept in Trash for 30 days.`,
@@ -263,12 +382,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       i.id === item.id ? { ...i, deleted_at: now, available: false } : i,
     );
     setItems(updatedItems);
-    persistChanges(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems, true);
     toast.success(`"${item.name}" moved to Trash (auto-purges in 30 days)`);
   }
 
   // Move Category to Trash (Soft Delete category and attached dishes)
-  function handleTrashCategory(cat: DatabaseCategory) {
+  async function handleTrashCategory(cat: DatabaseCategory) {
     const isMatchingItem = (i: DatabaseMenuItem) =>
       i.category_id === cat.id ||
       i.category_id === cat.slug ||
@@ -291,22 +410,22 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     );
     setCategories(updatedCats);
     setItems(updatedItems);
-    persistChanges(updatedCats, updatedItems);
+    persistChangesToDatabase(updatedCats, updatedItems, true);
     toast.success(`Category "${cat.name}" moved to Trash`);
   }
 
   // Restore Item from Trash
-  function handleRestoreItem(item: DatabaseMenuItem) {
+  async function handleRestoreItem(item: DatabaseMenuItem) {
     const updatedItems = items.map((i) =>
       i.id === item.id ? { ...i, deleted_at: null, available: true } : i,
     );
     setItems(updatedItems);
-    persistChanges(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems, true);
     toast.success(`"${item.name}" restored to menu!`);
   }
 
   // Restore Category from Trash
-  function handleRestoreCategory(cat: DatabaseCategory) {
+  async function handleRestoreCategory(cat: DatabaseCategory) {
     const isMatchingItem = (i: DatabaseMenuItem) =>
       i.category_id === cat.id ||
       i.category_id === cat.slug ||
@@ -320,20 +439,20 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     );
     setCategories(updatedCats);
     setItems(updatedItems);
-    persistChanges(updatedCats, updatedItems);
+    persistChangesToDatabase(updatedCats, updatedItems, true);
     toast.success(`Category "${cat.name}" and attached dishes restored!`);
   }
 
   // Permanently Delete Item
-  function handlePermanentDeleteItem(item: DatabaseMenuItem) {
+  async function handlePermanentDeleteItem(item: DatabaseMenuItem) {
     const updatedItems = items.filter((i) => i.id !== item.id);
     setItems(updatedItems);
-    persistChanges(categories, updatedItems);
+    persistChangesToDatabase(categories, updatedItems, true);
     toast.success(`"${item.name}" permanently deleted`);
   }
 
   // Permanently Delete Category
-  function handlePermanentDeleteCategory(cat: DatabaseCategory) {
+  async function handlePermanentDeleteCategory(cat: DatabaseCategory) {
     const isMatchingItem = (i: DatabaseMenuItem) =>
       i.category_id === cat.id ||
       i.category_id === cat.slug ||
@@ -345,22 +464,36 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     const updatedItems = items.map((i) => (isMatchingItem(i) ? { ...i, category_id: null } : i));
     setCategories(updatedCats);
     setItems(updatedItems);
-    persistChanges(updatedCats, updatedItems);
+    persistChangesToDatabase(updatedCats, updatedItems, true);
     toast.success(`Category "${cat.name}" permanently deleted`);
   }
 
   // Empty Entire Trash
-  function handleEmptyTrash() {
+  async function handleEmptyTrash() {
     const remainingItems = items.filter((i) => !i.deleted_at);
     const remainingCats = categories.filter((c) => !c.deleted_at);
     setItems(remainingItems);
     setCategories(remainingCats);
-    persistChanges(remainingCats, remainingItems);
+    persistChangesToDatabase(remainingCats, remainingItems, true);
     toast.success("Trash emptied permanently");
   }
 
-  // Save Item (Add or Edit)
-  function handleSaveItem(data: {
+  // Save All Changes to Database
+  async function handleSaveAllToDatabase() {
+    try {
+      const res = await batchSync.flushPending();
+      if (res.success) {
+        toast.success(
+          `All ${items.length} dishes & ${categories.length} categories stored to database!`,
+        );
+      }
+    } catch {
+      toast.error("Failed to save all changes to database.");
+    }
+  }
+
+  // Save Item (Add or Edit) with optimistic update + instant local sync
+  async function handleSaveItem(data: {
     id?: string;
     name: string;
     description: string | null;
@@ -397,12 +530,13 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     setItems(newItems);
-    persistChanges(categories, newItems);
+    persistChangesToDatabase(categories, newItems, true);
+
     toast.success(isEditing ? `"${data.name}" updated!` : `"${data.name}" added to menu!`);
   }
 
   // Save Category (Add or Edit)
-  function handleSaveCategory(data: {
+  async function handleSaveCategory(data: {
     id?: string;
     name: string;
     slug: string;
@@ -447,11 +581,25 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }
 
     setCategories(newCats);
-    persistChanges(newCats, newItems);
+    persistChangesToDatabase(newCats, newItems, true);
+
     toast.success(
       isEditing ? `Category "${data.name}" updated!` : `Category "${data.name}" added!`,
     );
   }
+
+  // Filtered menu items, ordered by sort_order
+  const filteredItems = useMemo(() => {
+    const list = activeItems.filter((item) => {
+      return (
+        !searchQuery ||
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      );
+    });
+
+    return list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  }, [activeItems, searchQuery]);
 
   // Categories sorted by sort_order
   const sortedCategories = useMemo(() => {
@@ -464,115 +612,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     categories.forEach((cat) => {
       map.set(cat.id, cat.name);
       map.set(cat.slug, cat.name);
-      if (cat.slug) {
-        map.set(`cat-${cat.slug}`, cat.name);
-      }
     });
     return map;
   }, [categories]);
 
-  const defaultDishCategoryMap: Record<string, string> = useMemo(
-    () => ({
-      "vegetable samosas": "starters",
-      "chicken pakora": "starters",
-      "onion bhaji": "starters",
-      "lamb seekh kebab": "grill",
-      "chicken tikka skewers": "grill",
-      "mixed grill platter": "grill",
-      "classic butter chicken": "curries",
-      "chicken tikka masala": "curries",
-      "lamb karahi": "curries",
-      "daal tarka": "curries",
-      "royal lamb biryani": "biryani",
-      "chicken biryani": "biryani",
-      "pilau rice": "biryani",
-      "peshwari naan": "breads",
-      "garlic naan": "breads",
-      "mint raita": "breads",
-      "gulab jamun": "desserts",
-      kheer: "desserts",
-      "mango lassi": "desserts",
-      "masala chai": "desserts",
-    }),
-    [],
-  );
-
-  // Helper to resolve an item's parent category
-  const resolveItemCategory = useCallback(
-    (item: DatabaseMenuItem): DatabaseCategory | undefined => {
-      let matchedCat = sortedCategories.find(
-        (c) =>
-          Boolean(item.category_id) &&
-          (item.category_id === c.id ||
-            item.category_id === c.slug ||
-            (c.slug && item.category_id === `cat-${c.slug}`) ||
-            (c.slug && item.category_id?.includes(c.slug)) ||
-            (c.name && item.category_id?.toLowerCase() === c.name.toLowerCase())),
-      );
-
-      if (!matchedCat && defaultDishCategoryMap[item.name.toLowerCase().trim()]) {
-        const targetSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
-        matchedCat = sortedCategories.find(
-          (c) =>
-            c.slug === targetSlug ||
-            c.id === targetSlug ||
-            c.id === `cat-${targetSlug}` ||
-            c.name.toLowerCase().includes(targetSlug),
-        );
-      }
-
-      return matchedCat;
-    },
-    [sortedCategories, defaultDishCategoryMap],
-  );
-
-  // Helper to get category index for Home page view ordering
-  const getCategoryOrderIndex = useCallback(
-    (item: DatabaseMenuItem) => {
-      const cat = resolveItemCategory(item);
-      if (!cat) return 9999;
-      const idx = sortedCategories.findIndex((c) => c.id === cat.id);
-      return idx >= 0 ? idx : 9999;
-    },
-    [sortedCategories, resolveItemCategory],
-  );
-
-  // Filtered menu items, ordered exactly as viewed on the Home page:
-  // 1. By Category sort order (sortedCategories)
-  // 2. By Item sort_order within each category
-  const filteredItems = useMemo(() => {
-    const list = activeItems.filter((item) => {
-      const matchesSearch =
-        !searchQuery ||
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      if (!matchesSearch) return false;
-
-      if (itemCategoryFilter && itemCategoryFilter !== "all") {
-        const itemCat = resolveItemCategory(item);
-        return (
-          itemCat?.id === itemCategoryFilter ||
-          itemCat?.slug === itemCategoryFilter ||
-          item.category_id === itemCategoryFilter
-        );
-      }
-
-      return true;
-    });
-
-    return list.sort((a, b) => {
-      const catIdxA = getCategoryOrderIndex(a);
-      const catIdxB = getCategoryOrderIndex(b);
-      if (catIdxA !== catIdxB) {
-        return catIdxA - catIdxB;
-      }
-      return (a.sort_order ?? 0) - (b.sort_order ?? 0);
-    });
-  }, [activeItems, searchQuery, itemCategoryFilter, resolveItemCategory, getCategoryOrderIndex]);
-
-  // Reorder categories step-by-step
-  function handleReorderCategories(fromIdx: number, toIdx: number) {
+  // Reorder categories step-by-step with immediate database persistence
+  async function handleReorderCategories(fromIdx: number, toIdx: number) {
     if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || toIdx >= sortedCategories.length) return;
     const current = [...sortedCategories];
     const [movedCat] = current.splice(fromIdx, 1);
@@ -584,12 +629,18 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }));
 
     setCategories(reordered);
-    persistChanges(reordered, items);
+    persistChangesToDatabase(reordered, items);
     toast.success(`"${movedCat.name}" moved to position #${toIdx + 1}`);
+
+    try {
+      await persistCategoryOrder(reordered);
+    } catch (err) {
+      console.warn("Failed to persist category order:", err);
+    }
   }
 
-  // Reorder menu items step-by-step
-  function handleReorderItems(fromFilteredIdx: number, toFilteredIdx: number) {
+  // Reorder menu items step-by-step with immediate database persistence
+  async function handleReorderItems(fromFilteredIdx: number, toFilteredIdx: number) {
     if (
       fromFilteredIdx === toFilteredIdx ||
       fromFilteredIdx < 0 ||
@@ -617,8 +668,14 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
     }));
 
     setItems(reordered);
-    persistChanges(categories, reordered);
+    persistChangesToDatabase(categories, reordered);
     toast.success(`"${movedItem.name}" moved to position #${toFilteredIdx + 1}`);
+
+    try {
+      await persistItemOrder(reordered);
+    } catch (err) {
+      console.warn("Failed to persist item order:", err);
+    }
   }
 
   // Step helpers to move items/categories directly up or down
@@ -652,6 +709,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                   variant="outline"
                   className="border-gold/40 text-[9px] sm:text-[10px] text-gold px-1.5 py-0"
                 >
+                  Admin
+                </Badge>
+                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 text-muted-foreground">
                   Admin Portal
                 </Badge>
               </div>
@@ -662,6 +722,27 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSaveAllToDatabase}
+              disabled={batchSync.isSaving}
+              className="h-8 px-2.5 sm:px-3.5 gap-1.5 text-xs font-semibold border-gold/50 bg-gold/15 text-gold hover:bg-gold hover:text-primary transition-all shadow-xs cursor-pointer"
+              title="Save all changes to database"
+            >
+              {batchSync.isSaving ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin text-gold" />
+                  <span className="hidden xs:inline">Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="size-3.5 text-gold" />
+                  <span>Save to Database</span>
+                </>
+              )}
+            </Button>
+
             <Link
               to="/"
               target="_blank"
@@ -775,8 +856,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               onClick={() => handleSelectTab("special_offer")}
               className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-all ${
                 activeTab === "special_offer"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-gold shadow-xs ring-1 ring-gold/40 font-semibold"
+                  : "text-gold hover:text-gold hover:bg-gold/10"
               }`}
             >
               <Tag className="size-3.5 shrink-0 text-gold" />
@@ -788,8 +869,8 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
               onClick={() => handleSelectTab("trash")}
               className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-all ${
                 activeTab === "trash"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-amber-500 shadow-xs ring-1 ring-amber-500/40 font-semibold"
+                  : "text-muted-foreground hover:text-amber-500"
               }`}
             >
               <Trash2 className="size-3.5 shrink-0" />
@@ -799,7 +880,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
             </button>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
             {activeTab === "items" && (
               <Button
                 size="sm"
@@ -810,7 +891,7 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                 className="h-8 gap-1 bg-primary text-xs font-medium flex-1 sm:flex-none justify-center"
               >
                 <Plus className="size-3.5" />
-                <span>Add Dish</span>
+                <span>Add Menu Item</span>
               </Button>
             )}
 
@@ -833,74 +914,16 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         {/* TAB 1: MENU ITEMS */}
         {activeTab === "items" && (
           <div className="space-y-4">
-            {/* Search Bar & Category Filter Pills */}
-            <div className="space-y-2.5">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search dishes by name or description..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-8 pl-8 text-xs border-border/70"
-                  />
-                </div>
-              </div>
-
-              {/* Horizontal Category Filter Pills (Matches Home Menu Layout) */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
-                <button
-                  type="button"
-                  onClick={() => setItemCategoryFilter("all")}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
-                    itemCategoryFilter === "all"
-                      ? "bg-primary text-primary-foreground font-semibold shadow-2xs"
-                      : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                >
-                  <span>All Dishes</span>
-                  <span
-                    className={`rounded-full px-1.5 py-0.2 text-[10px] ${
-                      itemCategoryFilter === "all"
-                        ? "bg-primary-foreground/20 text-primary-foreground"
-                        : "bg-background/80 text-muted-foreground"
-                    }`}
-                  >
-                    {activeItems.length}
-                  </span>
-                </button>
-
-                {sortedCategories.map((cat) => {
-                  const isSelected =
-                    itemCategoryFilter === cat.id || itemCategoryFilter === cat.slug;
-                  const catDishesCount = activeItems.filter(
-                    (i) => resolveItemCategory(i)?.id === cat.id,
-                  ).length;
-
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => setItemCategoryFilter(isSelected ? "all" : cat.id)}
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors shrink-0 ${
-                        isSelected
-                          ? "bg-gold text-gold-foreground font-semibold shadow-2xs"
-                          : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <span>{cat.name}</span>
-                      <span
-                        className={`rounded-full px-1.5 py-0.2 text-[10px] ${
-                          isSelected
-                            ? "bg-black/20 text-gold-foreground"
-                            : "bg-background/80 text-muted-foreground"
-                        }`}
-                      >
-                        {catDishesCount}
-                      </span>
-                    </button>
-                  );
-                })}
+            {/* Search Bar */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search dishes by name or description..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-8 pl-8 text-xs border-border/70"
+                />
               </div>
             </div>
 
@@ -1012,10 +1035,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                             </span>
                             <span className="text-muted-foreground text-[10px] shrink-0">•</span>
                             <span className="inline-flex rounded bg-muted/80 px-1.5 py-0.2 text-[10px] font-normal text-muted-foreground truncate max-w-[100px]">
-                              {resolveItemCategory(item)?.name ||
-                                (item.category_id
-                                  ? categoryMap.get(item.category_id) || "Category"
-                                  : "Category")}
+                              {item.category_id
+                                ? categoryMap.get(item.category_id) || "Category"
+                                : "Category"}
                             </span>
                             {/* 1-tap Active/Inactive toggle button */}
                             <button
@@ -1154,10 +1176,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                             {/* Category Badge */}
                             <td className="px-4 py-2 whitespace-nowrap">
                               <span className="inline-flex rounded bg-muted/80 px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
-                                {resolveItemCategory(item)?.name ||
-                                  (item.category_id
-                                    ? categoryMap.get(item.category_id) || "Category"
-                                    : "Category")}
+                                {item.category_id
+                                  ? categoryMap.get(item.category_id) || "Category"
+                                  : "Category"}
                               </span>
                             </td>
 
@@ -1206,15 +1227,15 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
                                   title="Edit Dish"
                                 >
                                   <Edit2 className="size-3" />
-                                  <span>Edit</span>
+                                  <span className="hidden sm:inline">Edit</span>
                                 </Button>
 
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleTrashItem(item)}
-                                  className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                  title="Move to Trash"
+                                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  title="Move Dish to Trash"
                                 >
                                   <Trash2 className="size-3" />
                                 </Button>
@@ -1234,137 +1255,326 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
         {/* TAB 2: CATEGORIES */}
         {activeTab === "categories" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">Menu Categories</h3>
-                <p className="text-xs text-muted-foreground">
-                  Order of categories determines how sections appear on the homepage and customer
-                  menu.
+            {sortedCategories.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/60 bg-card p-8 text-center">
+                <Layers className="mx-auto size-8 text-muted-foreground/50 mb-2" />
+                <p className="text-xs font-medium text-foreground">No categories found</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Categories organize dishes into distinct sections.
                 </p>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {sortedCategories.map((cat, idx) => {
-                const count = activeItems.filter(
-                  (i) => resolveItemCategory(i)?.id === cat.id,
-                ).length;
-
-                return (
-                  <div
-                    key={cat.id}
-                    className="rounded-xl border border-border/70 bg-card p-4 shadow-2xs hover:border-gold/40 transition-colors"
+                <div className="mt-3 flex justify-center">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditingCategory(null);
+                      setCategoryDialogOpen(true);
+                    }}
+                    className="h-7 text-xs gap-1"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary font-bold text-xs">
-                          #{idx + 1}
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-sm text-foreground">{cat.name}</h4>
-                          <p className="text-[11px] text-muted-foreground">
-                            {count} {count === 1 ? "dish" : "dishes"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={idx === 0}
-                          onClick={() => moveCategoryStep(idx, -1)}
-                          className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
-                          title="Move category up"
-                        >
-                          <ChevronUp className="size-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={idx === sortedCategories.length - 1}
-                          onClick={() => moveCategoryStep(idx, 1)}
-                          className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
-                          title="Move category down"
-                        >
-                          <ChevronDown className="size-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between border-t border-border/50 pt-2.5 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleCategoryVisibility(cat)}
-                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
-                          cat.available !== false
-                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                            : "bg-muted text-muted-foreground"
+                    <Plus className="size-3" />
+                    Add Category
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* MOBILE VIEW: Thin category cards */}
+                <div className="space-y-2 md:hidden">
+                  {sortedCategories.map((cat, idx) => {
+                    const count = activeItems.filter((i) => i.category_id === cat.id).length;
+                    return (
+                      <div
+                        key={cat.id}
+                        className={`rounded-lg border p-2.5 transition-colors ${
+                          cat.available === false
+                            ? "border-border/40 bg-card/60 opacity-80"
+                            : "border-border/60 bg-card hover:border-gold/30"
                         }`}
                       >
-                        {cat.available !== false ? "Active" : "Inactive"}
-                      </button>
+                        <div className="flex items-center gap-2.5">
+                          {/* Order Step Buttons */}
+                          <div className="flex flex-col items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => moveCategoryStep(idx, -1)}
+                              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
+                              title="Move up"
+                              aria-label={`Move category ${cat.name} up`}
+                            >
+                              <ChevronUp className="size-3.5" />
+                            </button>
 
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setEditingCategory(cat);
-                            setCategoryDialogOpen(true);
-                          }}
-                          className="h-7 px-2 text-xs"
-                        >
-                          <Edit2 className="size-3 mr-1" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleTrashCategory(cat)}
-                          className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
+                            <span className="text-[10px] font-mono text-muted-foreground/70 font-medium">
+                              #{idx + 1}
+                            </span>
+
+                            <button
+                              type="button"
+                              disabled={idx === sortedCategories.length - 1}
+                              onClick={() => moveCategoryStep(idx, 1)}
+                              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold active:bg-gold/25 disabled:opacity-20 disabled:pointer-events-none touch-manipulation"
+                              title="Move down"
+                              aria-label={`Move category ${cat.name} down`}
+                            >
+                              <ChevronDown className="size-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Category Details */}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="font-medium text-xs text-foreground truncate">
+                                {cat.name}
+                              </h4>
+                              {isShopCategory(cat) && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1.5 py-0 font-medium text-amber-500 border-amber-500/40 bg-amber-500/10 shrink-0"
+                                >
+                                  Shop (Excluded)
+                                </Badge>
+                              )}
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] px-1.5 py-0 font-normal shrink-0"
+                              >
+                                {count} {count === 1 ? "item" : "items"}
+                              </Badge>
+
+                              {/* 1-tap Active/Inactive toggle button */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleCategoryVisibility(cat)}
+                                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                                  cat.available !== false
+                                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"
+                                    : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
+                                }`}
+                                title={`Click to mark ${cat.available !== false ? "Inactive" : "Active"}`}
+                              >
+                                {cat.available !== false ? (
+                                  <>
+                                    <span className="size-1.5 rounded-full bg-emerald-500" />
+                                    <span>Active</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="size-1.5 rounded-full bg-muted-foreground/60" />
+                                    <span>Inactive</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className="mt-0.5 font-mono text-[10px] text-muted-foreground truncate">
+                              /{cat.slug}
+                            </p>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setEditingCategory(cat);
+                                setCategoryDialogOpen(true);
+                              }}
+                              className="h-7 px-2 text-[11px] font-medium"
+                              title="Edit Category"
+                            >
+                              <Edit2 className="size-3" />
+                              <span className="hidden xs:inline ml-1">Edit</span>
+                            </Button>
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleTrashCategory(cat)}
+                              className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                              title="Move Category to Trash"
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    );
+                  })}
+                </div>
+
+                {/* DESKTOP VIEW: Sleek Table */}
+                <div className="hidden md:block rounded-xl border border-border/60 bg-card shadow-2xs overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border/60 bg-muted/30 font-medium text-muted-foreground">
+                        <tr>
+                          <th className="w-14 px-3 py-2.5 text-center font-normal">Order</th>
+                          <th className="px-4 py-2.5">Category Name</th>
+                          <th className="px-4 py-2.5">URL Slug</th>
+                          <th className="px-4 py-2.5">Items Count</th>
+                          <th className="px-4 py-2.5 text-center">Visibility</th>
+                          <th className="px-4 py-2.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {sortedCategories.map((cat, idx) => {
+                          const count = activeItems.filter((i) => i.category_id === cat.id).length;
+                          return (
+                            <tr
+                              key={cat.id}
+                              className={`transition-colors hover:bg-muted/20 ${
+                                cat.available === false ? "opacity-75 bg-muted/10" : ""
+                              }`}
+                            >
+                              {/* Order Step Buttons */}
+                              <td className="w-14 px-2 py-2 text-center align-middle">
+                                <div className="inline-flex items-center gap-1">
+                                  <span className="text-[10px] font-mono text-muted-foreground w-4 text-right">
+                                    #{idx + 1}
+                                  </span>
+                                  <div className="flex flex-col gap-0.5">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => moveCategoryStep(idx, -1)}
+                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
+                                      title="Move up"
+                                      aria-label={`Move category ${cat.name} up`}
+                                    >
+                                      <ChevronUp className="size-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === sortedCategories.length - 1}
+                                      onClick={() => moveCategoryStep(idx, 1)}
+                                      className="flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-gold/15 hover:text-gold disabled:opacity-20 disabled:pointer-events-none"
+                                      title="Move down"
+                                      aria-label={`Move category ${cat.name} down`}
+                                    >
+                                      <ChevronDown className="size-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-2 font-medium text-foreground text-xs">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{cat.name}</span>
+                                  {isShopCategory(cat) && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[9px] px-1.5 py-0 font-medium text-amber-500 border-amber-500/40 bg-amber-500/10 shrink-0"
+                                    >
+                                      Shop (Excluded)
+                                    </Badge>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2 font-mono text-muted-foreground text-[11px]">
+                                /{cat.slug}
+                              </td>
+                              <td className="px-4 py-2">
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] font-normal px-1.5 py-0"
+                                >
+                                  {count} {count === 1 ? "item" : "items"}
+                                </Badge>
+                              </td>
+
+                              {/* 1-tap Visibility toggle */}
+                              <td className="px-4 py-2 text-center whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleCategoryVisibility(cat)}
+                                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                                    cat.available !== false
+                                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 shadow-2xs"
+                                      : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
+                                  }`}
+                                  title={`Click to toggle: currently ${cat.available !== false ? "Active" : "Inactive"}`}
+                                >
+                                  {cat.available !== false ? (
+                                    <>
+                                      <span className="size-1.5 rounded-full bg-emerald-500" />
+                                      <span>Active</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="size-1.5 rounded-full bg-muted-foreground/60" />
+                                      <span>Inactive</span>
+                                    </>
+                                  )}
+                                </button>
+                              </td>
+
+                              <td className="px-4 py-2 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingCategory(cat);
+                                      setCategoryDialogOpen(true);
+                                    }}
+                                    className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+                                    title="Edit Category"
+                                  >
+                                    <Edit2 className="size-3" />
+                                    <span className="hidden sm:inline">Edit</span>
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleTrashCategory(cat)}
+                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    title="Move Category to Trash"
+                                  >
+                                    <Trash2 className="size-3" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* TAB 3: SPECIAL OFFERS */}
-        {activeTab === "special_offer" && (
-          <div className="space-y-4">
-            <SpecialOfferManager />
-          </div>
-        )}
+        {/* TAB 3: SPECIAL OFFER / COMBO BANNER */}
+        {activeTab === "special_offer" && <SpecialOfferManager />}
 
-        {/* TAB 4: TRASH & RECYCLE BIN */}
+        {/* TAB 4: TRASH & RECYCLE BIN (30-DAY AUTO PURGE) */}
         {activeTab === "trash" && (
           <TrashManager
             trashedItems={trashedItems}
             trashedCategories={trashedCategories}
             categoryMap={categoryMap}
-            onRestoreItem={async (item) => handleRestoreItem(item)}
-            onRestoreCategory={async (cat) => handleRestoreCategory(cat)}
-            onPermanentDeleteItem={async (item) => handlePermanentDeleteItem(item)}
-            onPermanentDeleteCategory={async (cat) => handlePermanentDeleteCategory(cat)}
-            onEmptyTrash={async () => handleEmptyTrash()}
+            onRestoreItem={handleRestoreItem}
+            onRestoreCategory={handleRestoreCategory}
+            onPermanentDeleteItem={handlePermanentDeleteItem}
+            onPermanentDeleteCategory={handlePermanentDeleteCategory}
+            onEmptyTrash={handleEmptyTrash}
           />
         )}
       </main>
 
-      {/* Item Modal */}
+      {/* Item Dialog */}
       <MenuItemDialog
         open={itemDialogOpen}
         onOpenChange={setItemDialogOpen}
         item={editingItem}
-        categories={sortedCategories}
+        categories={activeCategories}
         onSave={handleSaveItem}
       />
 
-      {/* Category Modal */}
+      {/* Category Dialog */}
       <CategoryDialog
         open={categoryDialogOpen}
         onOpenChange={setCategoryDialogOpen}

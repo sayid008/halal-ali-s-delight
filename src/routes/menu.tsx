@@ -4,10 +4,11 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { MenuItemRow } from "@/components/menu-item-row";
 import { restaurant } from "@/data/menu";
-import { usePublicMenu } from "@/hooks/use-public-menu";
+import { useWebsitePreloader } from "@/hooks/use-website-preloader";
 import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
+import { DatabaseLoadingScreen } from "@/components/database-loading-screen";
 import { isShopCategory } from "@/lib/supabase";
-import { Loader2, UtensilsCrossed } from "lucide-react";
+import { UtensilsCrossed } from "lucide-react";
 
 const title = "Menu — Halal Ali Dine Inn & Take Away";
 const description =
@@ -28,7 +29,11 @@ export const Route = createFileRoute("/menu")({
 });
 
 function MenuPage() {
-  const { sections, loading } = usePublicMenu();
+  const { sections, isReady, loadingStatus } = useWebsitePreloader({
+    minDurationMs: 2000,
+    maxTimeoutMs: 4000,
+  });
+
   const categoryBarRef = useRef<HTMLDivElement | null>(null);
   const isClickScrollingRef = useRef(false);
   const clickTimeoutRef = useRef<number | null>(null);
@@ -155,8 +160,12 @@ function MenuPage() {
     [centerActivePill],
   );
 
+  if (!isReady) {
+    return <DatabaseLoadingScreen status={loadingStatus} isReady={isReady} />;
+  }
+
   return (
-    <div className="min-h-screen bg-background text-primary">
+    <div className="min-h-screen bg-background text-primary animate-in fade-in-0 duration-300">
       <SiteHeader />
 
       <main className="mx-auto max-w-5xl px-6 py-8">
@@ -174,14 +183,7 @@ function MenuPage() {
           <SpecialOfferHeroBanner />
         </div>
 
-        {loading && displaySections.length === 0 && (
-          <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground justify-center">
-            <Loader2 className="size-5 animate-spin text-primary" />
-            <span>Loading menu from database...</span>
-          </div>
-        )}
-
-        {!loading && displaySections.length === 0 && (
+        {displaySections.length === 0 && (
           <div className="my-12 rounded-2xl border border-dashed border-border/80 p-8 text-center">
             <UtensilsCrossed className="mx-auto size-8 text-muted-foreground/60 mb-2" />
             <h3 className="font-serif text-lg font-bold text-foreground">Menu Empty</h3>

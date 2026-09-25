@@ -2,9 +2,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { HomeMenuBrowser } from "@/components/home-menu-browser";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { SpecialOfferHeroBanner } from "@/components/special-offer-hero-banner";
 import { restaurant } from "@/data/menu";
-import { usePublicMenu } from "@/hooks/use-public-menu";
-import { Loader2 } from "lucide-react";
+import { useWebsitePreloader } from "@/hooks/use-website-preloader";
+import { DatabaseLoadingScreen } from "@/components/database-loading-screen";
 
 const title = "Halal Ali Dine Inn & Take Away — Authentic Halal Cuisine in London";
 const description =
@@ -25,7 +26,14 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const { sections, loading } = usePublicMenu();
+  const { sections, isReady, loadingStatus } = useWebsitePreloader({
+    minDurationMs: 2000,
+    maxTimeoutMs: 4000,
+  });
+
+  if (!isReady) {
+    return <DatabaseLoadingScreen status={loadingStatus} isReady={isReady} />;
+  }
 
   // ONLY display categories and items present in the persistent database
   const displaySections = sections.map((s) => ({
@@ -40,7 +48,7 @@ function Index() {
   }));
 
   return (
-    <div className="min-h-screen bg-background text-primary">
+    <div className="min-h-screen bg-background text-primary animate-in fade-in-0 duration-300">
       <SiteHeader />
 
       <main>
@@ -69,16 +77,14 @@ function Index() {
               </Link>
             </div>
           </div>
+
+          {/* Database Live Special Offer Banner */}
+          <div className="mb-8">
+            <SpecialOfferHeroBanner />
+          </div>
         </section>
 
-        {loading && sections.length === 0 ? (
-          <div className="mx-auto max-w-5xl px-6 py-12 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin text-primary" />
-            <span>Loading menu from database...</span>
-          </div>
-        ) : (
-          <HomeMenuBrowser sections={displaySections} />
-        )}
+        <HomeMenuBrowser sections={displaySections} />
       </main>
 
       <SiteFooter />
