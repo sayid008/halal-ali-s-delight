@@ -29,10 +29,7 @@ export const Route = createFileRoute("/menu")({
 });
 
 function MenuPage() {
-  const { sections, isReady, loadingStatus } = useWebsitePreloader({
-    minDurationMs: 2000,
-    maxTimeoutMs: 4000,
-  });
+  const { sections, isReady, loadingStatus } = useWebsitePreloader();
 
   const categoryBarRef = useRef<HTMLDivElement | null>(null);
   const isClickScrollingRef = useRef(false);

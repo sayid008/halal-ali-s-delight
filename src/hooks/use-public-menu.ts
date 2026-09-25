@@ -134,18 +134,39 @@ function buildSectionsFromData(
     }
   });
 
-  // Return all active categories so admin changes reflect immediately
   return grouped;
 }
 
 export function usePublicMenu() {
-  // Always initialize with [] on both SSR and client for 100% consistent initial hydration
   const [sections, setSections] = useState<MenuSectionWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchMenu = useCallback(async () => {
-    // 1. Primary: Fetch from live Supabase database if configured
+    // 1. Primary: Fetch from server API database (/api/menu)
+    try {
+      const res = await fetch("/api/menu", {
+        cache: "no-store",
+        headers: { "cache-control": "no-cache" },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+          const grouped = buildSectionsFromData(data.categories, data.items || []);
+          setSections(grouped);
+          cacheLocalMenu(data.categories, data.items || []);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // ignore network error, proceed to next source
+    }
+
+    // 2. Fetch from Supabase database if configured
     if (isSupabaseConfigured) {
       try {
         const [catRes, itemRes] = await Promise.all([
@@ -168,29 +189,6 @@ export function usePublicMenu() {
       }
     }
 
-    // 2. Fetch from server API database
-    try {
-      const res = await fetch("/api/menu", {
-        cache: "no-store",
-        headers: { "cache-control": "no-cache" },
-      });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          categories?: DatabaseCategory[];
-          items?: DatabaseMenuItem[];
-        };
-        if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
-          const grouped = buildSectionsFromData(data.categories, data.items || []);
-          setSections(grouped);
-          cacheLocalMenu(data.categories, data.items || []);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {
-      // ignore network error, fall through to alternatives
-    }
-
     // 3. Fallback to cached local snapshot of database
     const localSnapshot = getLocalMenuSnapshot();
     if (
@@ -204,7 +202,6 @@ export function usePublicMenu() {
       return;
     }
 
-    // If database is completely empty, strictly return empty
     setSections([]);
     setLoading(false);
   }, []);

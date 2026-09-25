@@ -135,7 +135,31 @@ export function getLocalSpecialOffer(): SpecialOffer {
 export async function fetchSpecialOffer(): Promise<SpecialOffer> {
   const local = getLocalSpecialOffer();
 
-  // 1. Fetch from Supabase if configured
+  // 1. Primary: Fetch from server API database
+  try {
+    const res = await fetch("/api/special-offer", {
+      cache: "no-store",
+      headers: { "cache-control": "no-cache" },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { offer?: SpecialOffer } & SpecialOffer;
+      const fetchedOffer = data.offer || (data.title ? (data as SpecialOffer) : null);
+      if (fetchedOffer) {
+        if (isStorageAvailable()) {
+          try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fetchedOffer));
+          } catch {
+            // ignore
+          }
+        }
+        return fetchedOffer;
+      }
+    }
+  } catch {
+    // ignore network error, fall through
+  }
+
+  // 2. Fetch from Supabase if configured
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -175,26 +199,6 @@ export async function fetchSpecialOffer(): Promise<SpecialOffer> {
     }
   }
 
-  // 2. Fetch from server API database
-  try {
-    const res = await fetch("/api/special-offer");
-    if (res.ok) {
-      const data = (await res.json()) as { offer?: SpecialOffer };
-      if (data.offer) {
-        if (isStorageAvailable()) {
-          try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data.offer));
-          } catch {
-            // ignore
-          }
-        }
-        return data.offer;
-      }
-    }
-  } catch {
-    // ignore
-  }
-
   return local;
 }
 
@@ -213,15 +217,17 @@ export async function saveSpecialOffer(offer: SpecialOffer): Promise<SpecialOffe
     }
   }
 
-  // Persist to server API database in background if available
+  // Persist to server API database immediately
   if (typeof fetch !== "undefined") {
-    fetch("/api/special-offer", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(toSave),
-    }).catch(() => {
-      // ignore network errors
-    });
+    try {
+      await fetch("/api/special-offer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(toSave),
+      });
+    } catch (err) {
+      console.warn("Could not save to /api/special-offer:", err);
+    }
   }
 
   // Notify listeners on current window and other tabs

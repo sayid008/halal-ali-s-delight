@@ -5,6 +5,19 @@
 //     error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import type { Plugin, ViteDevServer } from "vite";
+import { handleDatabaseApiRequest } from "./src/lib/server-db-handlers";
+
+function databaseApiPlugin(): Plugin {
+  return {
+    name: "database-api-middleware",
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use((req, res, next) => {
+        handleDatabaseApiRequest(req, res, next);
+      });
+    },
+  };
+}
 
 export default defineConfig({
   tanstackStart: {
@@ -13,6 +26,28 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    envPrefix: ["VITE_", "SUPABASE_"],
+    define: {
+      "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(
+        process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "",
+      ),
+      "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(
+        process.env.VITE_SUPABASE_ANON_KEY ||
+          process.env.SUPABASE_ANON_KEY ||
+          process.env.SUPABASE_KEY ||
+          "",
+      ),
+      "import.meta.env.SUPABASE_URL": JSON.stringify(
+        process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "",
+      ),
+      "import.meta.env.SUPABASE_ANON_KEY": JSON.stringify(
+        process.env.SUPABASE_ANON_KEY ||
+          process.env.VITE_SUPABASE_ANON_KEY ||
+          process.env.SUPABASE_KEY ||
+          "",
+      ),
+    },
+    plugins: [databaseApiPlugin()],
     server: {
       host: "0.0.0.0",
       port: 3000,

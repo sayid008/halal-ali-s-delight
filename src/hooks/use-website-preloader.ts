@@ -3,14 +3,15 @@ import { usePublicMenu } from "@/hooks/use-public-menu";
 import { fetchSpecialOffer, type SpecialOffer, getLocalSpecialOffer } from "@/lib/special-offer";
 
 export function useWebsitePreloader(options?: { minDurationMs?: number; maxTimeoutMs?: number }) {
-  const minDurationMs = options?.minDurationMs ?? 2000; // 2 seconds minimum loading for smooth database fetch
-  const maxTimeoutMs = options?.maxTimeoutMs ?? 4000; // 4 seconds max timeout
+  // Lowest possible loading time: 0ms artificial delay (renders immediately as soon as data arrives)
+  const minDurationMs = options?.minDurationMs ?? 0;
+  const maxTimeoutMs = options?.maxTimeoutMs ?? 1500; // 1.5s max cap
 
   const { sections, loading: menuLoading } = usePublicMenu();
   const [specialOffer, setSpecialOffer] = useState<SpecialOffer | null>(null);
   const [isDatabaseReady, setIsDatabaseReady] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(
-    "Loading dishes, categories & special offers from database...",
+    "Loading live menu & special offers from database...",
   );
 
   const startTimeRef = useRef<number>(Date.now());
@@ -23,7 +24,7 @@ export function useWebsitePreloader(options?: { minDurationMs?: number; maxTimeo
       try {
         setLoadingStatus("Fetching live categories & dishes from database...");
 
-        // Fetch special offer from database in parallel
+        // Fetch special offer and database in parallel
         const offerPromise = fetchSpecialOffer().catch(() => getLocalSpecialOffer());
 
         const fetchedOffer = await offerPromise;
@@ -31,14 +32,13 @@ export function useWebsitePreloader(options?: { minDurationMs?: number; maxTimeo
           setSpecialOffer(fetchedOffer);
         }
 
-        setLoadingStatus("Finalizing menu & special offers...");
-
-        // Ensure smooth 2-4 second window for database sync
-        const elapsed = Date.now() - startTimeRef.current;
-        const remainingWait = Math.max(0, minDurationMs - elapsed);
-
-        if (remainingWait > 0) {
-          await new Promise((resolve) => setTimeout(resolve, remainingWait));
+        // If minDurationMs > 0, wait for that threshold; otherwise resolve immediately
+        if (minDurationMs > 0) {
+          const elapsed = Date.now() - startTimeRef.current;
+          const remainingWait = Math.max(0, minDurationMs - elapsed);
+          if (remainingWait > 0) {
+            await new Promise((resolve) => setTimeout(resolve, remainingWait));
+          }
         }
 
         if (!isCancelled) {
@@ -54,7 +54,7 @@ export function useWebsitePreloader(options?: { minDurationMs?: number; maxTimeo
 
     loadAllFromDatabase();
 
-    // Safety fallback timeout to never leave page stuck
+    // Fast safety fallback timeout
     const safetyTimer = setTimeout(() => {
       if (!isCancelled) {
         setIsDatabaseReady(true);
@@ -67,7 +67,8 @@ export function useWebsitePreloader(options?: { minDurationMs?: number; maxTimeo
     };
   }, [minDurationMs, maxTimeoutMs]);
 
-  const isReady = isDatabaseReady && (!menuLoading || sections.length > 0);
+  // Open instantly when database has returned data or ready
+  const isReady = isDatabaseReady || (!menuLoading && sections.length > 0);
 
   return {
     isReady,

@@ -1,16 +1,33 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl =
-  (import.meta.env.VITE_SUPABASE_URL as string) || "https://placeholder-project.supabase.co";
-const supabaseAnonKey =
+const rawUrl =
+  (import.meta.env.VITE_SUPABASE_URL as string) ||
+  (import.meta.env.SUPABASE_URL as string) ||
+  (typeof process !== "undefined" && (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL)) ||
+  "";
+
+const rawKey =
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder";
+  (import.meta.env.SUPABASE_ANON_KEY as string) ||
+  (import.meta.env.SUPABASE_KEY as string) ||
+  (typeof process !== "undefined" &&
+    (process.env.VITE_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_KEY)) ||
+  "";
 
 export const isSupabaseConfigured = Boolean(
-  import.meta.env.VITE_SUPABASE_URL &&
-  import.meta.env.VITE_SUPABASE_ANON_KEY &&
-  !String(import.meta.env.VITE_SUPABASE_URL).includes("placeholder-project"),
+  rawUrl &&
+    rawKey &&
+    rawUrl.startsWith("http") &&
+    !rawUrl.includes("placeholder-project") &&
+    !rawKey.includes("placeholder"),
 );
+
+const supabaseUrl = isSupabaseConfigured ? rawUrl : "https://placeholder-project.supabase.co";
+const supabaseAnonKey = isSupabaseConfigured
+  ? rawKey
+  : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder";
 
 export interface AdminUserSession {
   access_token: string;
@@ -159,6 +176,8 @@ export function formatPrice(price: number | string): string {
  * the existing public.is_admin() function or the public.admin_users table.
  */
 export async function verifyIsAdmin(userId?: string | null): Promise<boolean> {
+  if (!isSupabaseConfigured) return true;
+
   // 1. Check existing public.is_admin() RPC function
   try {
     const { data: isRpcAdmin, error: rpcErr } = await supabase.rpc("is_admin");

@@ -26,10 +26,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const { sections, isReady, loadingStatus } = useWebsitePreloader({
-    minDurationMs: 2000,
-    maxTimeoutMs: 4000,
-  });
+  const { sections, isReady, loadingStatus } = useWebsitePreloader();
 
   if (!isReady) {
     return <DatabaseLoadingScreen status={loadingStatus} isReady={isReady} />;

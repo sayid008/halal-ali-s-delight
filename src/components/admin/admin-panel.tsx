@@ -185,7 +185,34 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       setLoading(true);
     }
 
-    // 2. Fetch fresh data from Supabase live database if configured
+    // 2. Fetch fresh data from server API database (/api/menu)
+    try {
+      const res = await fetch("/api/menu", {
+        headers: { "cache-control": "no-cache" },
+      });
+      if (res.ok) {
+        const apiData = (await res.json()) as {
+          categories?: DatabaseCategory[];
+          items?: DatabaseMenuItem[];
+        };
+        if (
+          apiData.categories &&
+          Array.isArray(apiData.categories) &&
+          apiData.categories.length > 0
+        ) {
+          setCategories(apiData.categories);
+          setItems(apiData.items || []);
+          saveLocalMenuSnapshot(apiData.categories, apiData.items || [], "admin-load");
+          setHasInitialLoaded(true);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Fetch from Supabase live database if configured
     if (isSupabaseConfigured) {
       try {
         const timeoutPromise = new Promise<{
@@ -223,33 +250,6 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
       } catch (err) {
         console.warn("Could not fetch remote menu from Supabase:", err);
       }
-    }
-
-    // 3. Fetch from server API database (/api/menu)
-    try {
-      const res = await fetch("/api/menu", {
-        headers: { "cache-control": "no-cache" },
-      });
-      if (res.ok) {
-        const apiData = (await res.json()) as {
-          categories?: DatabaseCategory[];
-          items?: DatabaseMenuItem[];
-        };
-        if (
-          apiData.categories &&
-          Array.isArray(apiData.categories) &&
-          apiData.categories.length > 0
-        ) {
-          setCategories(apiData.categories);
-          setItems(apiData.items || []);
-          saveLocalMenuSnapshot(apiData.categories, apiData.items || [], "admin-load");
-          setHasInitialLoaded(true);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {
-      // ignore
     }
 
     // 4. Fallback to cached local snapshot or defaults
