@@ -62,29 +62,33 @@ function normalizeItemsWithCategories(
   const catByName = new Map<string, string>();
   const catById = new Set<string>();
 
-  catList.forEach((c) => {
+  (catList || []).forEach((c) => {
+    if (!c) return;
     if (c.id) catById.add(c.id);
     if (c.slug) catBySlug.set(c.slug.toLowerCase().trim(), c.id);
     if (c.name) catByName.set(c.name.toLowerCase().trim(), c.id);
   });
 
-  return itemsList.map((item) => {
-    let resolvedCatId = item.category_id;
-    if (!resolvedCatId || !catById.has(resolvedCatId)) {
-      const slug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
-      if (slug && catBySlug.has(slug)) {
-        resolvedCatId = catBySlug.get(slug) || null;
-      } else if (item.category_id && catBySlug.has(item.category_id.toLowerCase().trim())) {
-        resolvedCatId = catBySlug.get(item.category_id.toLowerCase().trim()) || null;
-      } else if (item.category_id && catByName.has(item.category_id.toLowerCase().trim())) {
-        resolvedCatId = catByName.get(item.category_id.toLowerCase().trim()) || null;
+  return (itemsList || [])
+    .filter((item): item is DatabaseMenuItem => Boolean(item && typeof item === "object"))
+    .map((item) => {
+      let resolvedCatId = item.category_id;
+      const itemNameKey = (item.name || "").toLowerCase().trim();
+      if (!resolvedCatId || !catById.has(resolvedCatId)) {
+        const slug = defaultDishCategoryMap[itemNameKey];
+        if (slug && catBySlug.has(slug)) {
+          resolvedCatId = catBySlug.get(slug) || null;
+        } else if (item.category_id && catBySlug.has(item.category_id.toLowerCase().trim())) {
+          resolvedCatId = catBySlug.get(item.category_id.toLowerCase().trim()) || null;
+        } else if (item.category_id && catByName.has(item.category_id.toLowerCase().trim())) {
+          resolvedCatId = catByName.get(item.category_id.toLowerCase().trim()) || null;
+        }
       }
-    }
-    return {
-      ...item,
-      category_id: resolvedCatId,
-    };
-  });
+      return {
+        ...item,
+        category_id: resolvedCatId,
+      };
+    });
 }
 
 // Convert home page static menu items into structured defaults
@@ -649,10 +653,13 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   // Filtered menu items, ordered by sort_order
   const filteredItems = useMemo(() => {
     const list = activeItems.filter((item) => {
+      if (!item) return false;
+      const itemName = item.name || "";
+      const itemDesc = item.description || "";
       return (
         !searchQuery ||
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()))
+        itemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        itemDesc.toLowerCase().includes(searchQuery.toLowerCase())
       );
     });
 
@@ -667,8 +674,9 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   // Lookup map for category name
   const categoryMap = useMemo(() => {
     const map = new Map<string, string>();
-    categories.forEach((cat) => {
-      map.set(cat.id, cat.name);
+    (categories || []).forEach((cat) => {
+      if (!cat) return;
+      if (cat.id) map.set(cat.id, cat.name);
       if (cat.slug) {
         map.set(cat.slug, cat.name);
         map.set(cat.slug.toLowerCase(), cat.name);
@@ -681,10 +689,12 @@ export function AdminPanel({ session, onSignOut }: AdminPanelProps) {
   }, [categories]);
 
   function getItemCategoryName(item: DatabaseMenuItem): string {
+    if (!item) return "Category";
     if (item.category_id && categoryMap.has(item.category_id)) {
       return categoryMap.get(item.category_id) || "Category";
     }
-    const defaultSlug = defaultDishCategoryMap[item.name.toLowerCase().trim()];
+    const nameKey = (item.name || "").toLowerCase().trim();
+    const defaultSlug = defaultDishCategoryMap[nameKey];
     if (defaultSlug && categoryMap.has(defaultSlug)) {
       return categoryMap.get(defaultSlug) || "Category";
     }
